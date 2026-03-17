@@ -6,8 +6,8 @@ import math
 import time
 from pathlib import Path
 
-from trading_bot.polymarket.config import Config
-from trading_bot.polymarket.models import BotState, BookSnapshot, FillResult, QuotePlan, utc_now
+from .config import Config
+from .models import BotState, BookSnapshot, FillResult, QuotePlan, utc_now
 
 
 def clamp(value: float, lower: float, upper: float) -> float:

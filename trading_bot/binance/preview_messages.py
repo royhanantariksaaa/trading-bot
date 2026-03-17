@@ -3,10 +3,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from trading_bot.binance.config import Config
-from trading_bot.binance.formatters import format_no_trade_message, format_startup_message, format_status_message
-from trading_bot.binance.notifier import DiscordNotifier
-from trading_bot.binance.tickets import ManualTicket, append_ticket, build_daily_summary, build_ticket_message, now_iso
+from .config import Config
+from .formatters import format_no_trade_message, format_startup_message, format_status_message
+from .notifier import DiscordNotifier
+from .tickets import ManualTicket, append_ticket, build_daily_summary, build_ticket_message, now_iso
 
 
 def main() -> None:

@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from trading_bot.binance.state import clear_pending_ticket, load_state, save_state
-from trading_bot.binance.tickets import VALID_TICKET_STATUSES, append_decision_log, update_ticket_status
+from .state import clear_pending_ticket, load_state, save_state
+from .tickets import VALID_TICKET_STATUSES, append_decision_log, update_ticket_status
 
 
 def main() -> None:

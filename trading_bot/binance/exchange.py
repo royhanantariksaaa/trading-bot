@@ -7,8 +7,8 @@ from decimal import Decimal, ROUND_DOWN
 import ccxt
 import pandas as pd
 
-from trading_bot.binance.config import Config
-from trading_bot.binance.models import AccountSnapshot, OrderState
+from .config import Config
+from .models import AccountSnapshot, OrderState
 
 
 class ExchangeValidationError(ValueError):

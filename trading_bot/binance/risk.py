@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from trading_bot.binance.config import Config
-from trading_bot.binance.exchange import ExchangeValidationError, SymbolRules, build_min_notional_warning, validate_market_quote_budget, validate_market_sell_quantity
-from trading_bot.binance.models import EntryPlan, ExitPlan
-from trading_bot.binance.state import BotState, has_open_order
+from .config import Config
+from .exchange import ExchangeValidationError, SymbolRules, build_min_notional_warning, validate_market_quote_budget, validate_market_sell_quantity
+from .models import EntryPlan, ExitPlan
+from .state import BotState, has_open_order
 
 
 def calc_position_size(balance_usdt: float, risk_per_trade: float, entry_price: float, stop_loss_pct: float) -> float:

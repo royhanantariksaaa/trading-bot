@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from exchange import SymbolRules, validate_market_quote_budget, validate_market_sell_quantity
+from trading_bot.binance.exchange import SymbolRules, validate_market_quote_budget, validate_market_sell_quantity
 
 
 class ExchangeRulesTest(unittest.TestCase):

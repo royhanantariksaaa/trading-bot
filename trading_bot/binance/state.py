@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from trading_bot.binance.models import AccountSnapshot, OrderState, PositionState
+from .models import AccountSnapshot, OrderState, PositionState
 
 
 @dataclass

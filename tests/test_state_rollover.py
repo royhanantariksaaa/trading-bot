@@ -4,7 +4,7 @@ import json
 import unittest
 from pathlib import Path
 
-from state import load_state, today_str
+from trading_bot.binance.state import load_state, today_str
 
 
 class StateRolloverTest(unittest.TestCase):

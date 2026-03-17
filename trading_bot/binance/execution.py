@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
-from trading_bot.binance.config import Config
-from trading_bot.binance.exchange import (
+from .config import Config
+from .exchange import (
     SymbolRules,
     cancel_order_by_client_id,
     order_average_price,
@@ -16,9 +16,9 @@ from trading_bot.binance.exchange import (
     validate_market_sell_order,
     validate_stop_loss_sell_order,
 )
-from trading_bot.binance.models import EntryPlan, ExitPlan, OrderState
-from trading_bot.binance.paper_wallet import PaperWallet
-from trading_bot.binance.state import (
+from .models import EntryPlan, ExitPlan, OrderState
+from .paper_wallet import PaperWallet
+from .state import (
     BotState,
     apply_entry_fill,
     apply_exit_fill,
@@ -28,7 +28,7 @@ from trading_bot.binance.state import (
     set_pending_ticket,
     upsert_open_order,
 )
-from trading_bot.binance.tickets import ManualTicket, ExecutionRecord, append_execution_log, append_ticket, get_ticket, new_ticket_id, update_ticket_status
+from .tickets import ManualTicket, ExecutionRecord, append_execution_log, append_ticket, get_ticket, new_ticket_id, update_ticket_status
 
 
 def build_client_order_id(symbol: str, side: str, candle_time: str, label: str = "") -> str:

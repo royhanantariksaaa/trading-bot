@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from trading_bot.binance.config import Config
-from trading_bot.binance.notifier import DiscordNotifier
+from .config import Config
+from .notifier import DiscordNotifier
 
 
 def main() -> None:

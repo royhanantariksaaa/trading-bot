@@ -4,7 +4,7 @@ import json
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from trading_bot.polymarket.models import BookSnapshot, QuoteLevel
+from .models import BookSnapshot, QuoteLevel
 
 
 class PolymarketPublicClient:

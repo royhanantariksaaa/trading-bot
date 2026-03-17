@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from trading_bot.binance.config import Config
-from trading_bot.binance.execution import apply_manual_execution
-from trading_bot.binance.state import load_state, save_state
+from .config import Config
+from .execution import apply_manual_execution
+from .state import load_state, save_state
 
 
 def main() -> None:

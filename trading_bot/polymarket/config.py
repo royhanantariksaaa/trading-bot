@@ -4,15 +4,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
-
-def _as_bool(value: str | None, default: bool = False) -> bool:
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+from trading_bot.common.env import env_bool
 
 
 @dataclass
@@ -29,7 +21,7 @@ class Config:
     inventory_skew_per_share: float = float(os.getenv("PM_INVENTORY_SKEW_PER_SHARE", "0.0025"))
     poll_seconds: int = int(os.getenv("PM_POLL_SECONDS", "5"))
     loops: int = int(os.getenv("PM_LOOPS", "0"))
-    paper_mode: bool = _as_bool(os.getenv("PM_PAPER_MODE"), True)
+    paper_mode: bool = env_bool(os.getenv("PM_PAPER_MODE"), True)
     state_path: Path = Path(os.getenv("PM_STATE_PATH", "polymarket_mm/state.json"))
     log_path: Path = Path(os.getenv("PM_LOG_PATH", "polymarket_mm/runs.csv"))
 

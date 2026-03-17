@@ -2,6 +2,8 @@
 
 Paper-first MVP for a **single Polymarket outcome token**.
 
+This folder is no longer a Python package. It just holds env/docs/default runtime files for the real implementation in `trading_bot.polymarket`.
+
 What it does:
 - reads the public CLOB orderbook from `https://clob.polymarket.com/book`
 - computes bid/ask quotes around the midpoint
@@ -30,7 +32,7 @@ copy polymarket_mm\.env.example polymarket_mm\.env
 3. Run:
 
 ```bat
-python polymarket_mm\main.py
+python -m trading_bot.polymarket
 ```
 
 ## Config knobs
@@ -61,4 +63,4 @@ The clean upgrade path is:
 - keep the same quote planner and risk layer
 - replace paper fill simulation with real open-order reconciliation
 
-That gets you from MVP to something not embarrassing.
+That gets you from MVP to something less embarrassing.

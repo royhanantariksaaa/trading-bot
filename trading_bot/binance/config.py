@@ -3,15 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
-
-def _as_bool(value: str | None, default: bool = False) -> bool:
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+from trading_bot.common.env import env_bool
 
 
 @dataclass
@@ -26,32 +18,32 @@ class Config:
     stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "0.02"))
     take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "0.03"))
     cooldown_candles: int = int(os.getenv("COOLDOWN_CANDLES", "2"))
-    kill_switch: bool = _as_bool(os.getenv("KILL_SWITCH"), False)
+    kill_switch: bool = env_bool(os.getenv("KILL_SWITCH"), False)
     poll_seconds: int = int(os.getenv("POLL_SECONDS", "30"))
-    enable_live_trading: bool = _as_bool(os.getenv("ENABLE_LIVE_TRADING"), False)
+    enable_live_trading: bool = env_bool(os.getenv("ENABLE_LIVE_TRADING"), False)
     discord_webhook_url: str = os.getenv("DISCORD_WEBHOOK_URL", "")
     status_every_loops: int = int(os.getenv("STATUS_EVERY_LOOPS", "10"))
-    use_rsi_filter: bool = _as_bool(os.getenv("USE_RSI_FILTER"), False)
+    use_rsi_filter: bool = env_bool(os.getenv("USE_RSI_FILTER"), False)
     rsi_buy_min: float = float(os.getenv("RSI_BUY_MIN", "55"))
     rsi_sell_max: float = float(os.getenv("RSI_SELL_MAX", "45"))
     rsi_period: int = int(os.getenv("RSI_PERIOD", "14"))
-    signal_on_closed_candle: bool = _as_bool(os.getenv("SIGNAL_ON_CLOSED_CANDLE"), True)
+    signal_on_closed_candle: bool = env_bool(os.getenv("SIGNAL_ON_CLOSED_CANDLE"), True)
     approval_mode: str = os.getenv("APPROVAL_MODE", "discord").lower()
     execution_mode: str = os.getenv("EXECUTION_MODE", "manual").lower()
     max_trade_usd: float = float(os.getenv("MAX_TRADE_USD", "5"))
     max_daily_loss_usd: float = float(os.getenv("MAX_DAILY_LOSS_USD", "1"))
     max_trades_per_day: int = int(os.getenv("MAX_TRADES_PER_DAY", "3"))
-    use_htf_filter: bool = _as_bool(os.getenv("USE_HTF_FILTER"), False)
+    use_htf_filter: bool = env_bool(os.getenv("USE_HTF_FILTER"), False)
     htf_1_timeframe: str = os.getenv("HTF_1_TIMEFRAME", "4h")
     htf_1_rsi_min: float = float(os.getenv("HTF_1_RSI_MIN", "50"))
     htf_1_rsi_period: int = int(os.getenv("HTF_1_RSI_PERIOD", "14"))
-    htf_2_enabled: bool = _as_bool(os.getenv("HTF_2_ENABLED"), False)
+    htf_2_enabled: bool = env_bool(os.getenv("HTF_2_ENABLED"), False)
     htf_2_timeframe: str = os.getenv("HTF_2_TIMEFRAME", "1d")
     htf_2_rsi_min: float = float(os.getenv("HTF_2_RSI_MIN", "50"))
     htf_2_rsi_period: int = int(os.getenv("HTF_2_RSI_PERIOD", "14"))
-    reconcile_on_start: bool = _as_bool(os.getenv("RECONCILE_ON_START"), True)
-    use_testnet: bool = _as_bool(os.getenv("USE_TESTNET"), True)
-    order_test_before_submit: bool = _as_bool(os.getenv("ORDER_TEST_BEFORE_SUBMIT"), False)
+    reconcile_on_start: bool = env_bool(os.getenv("RECONCILE_ON_START"), True)
+    use_testnet: bool = env_bool(os.getenv("USE_TESTNET"), True)
+    order_test_before_submit: bool = env_bool(os.getenv("ORDER_TEST_BEFORE_SUBMIT"), False)
     entry_size_mode: str = os.getenv("ENTRY_SIZE_MODE", "quote_budget").lower()
     recv_window_ms: int = int(os.getenv("RECV_WINDOW_MS", "5000"))
     binance_api_base_url: str = os.getenv("BINANCE_API_BASE_URL", "").strip()

@@ -1,6 +1,6 @@
-from trading_bot.polymarket.client import PolymarketPublicClient
-from trading_bot.polymarket.config import Config
-from trading_bot.polymarket.maker import run_loop
+from .client import PolymarketPublicClient
+from .config import Config
+from .maker import run_loop
 
 
 def main() -> None:

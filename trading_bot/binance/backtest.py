@@ -3,12 +3,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from trading_bot.binance.config import Config
-from trading_bot.binance.exchange import create_exchange, fetch_ohlcv_df, prepare_htf_rsi_filter
-from trading_bot.binance.logger import fmt_pct, log_event
-from trading_bot.binance.paper_wallet import PaperWallet
-from trading_bot.binance.risk import calc_position_size
-from trading_bot.binance.strategy import add_indicators, signal_for_index
+from .config import Config
+from .exchange import create_exchange, fetch_ohlcv_df, prepare_htf_rsi_filter
+from .logger import fmt_pct, log_event
+from .paper_wallet import PaperWallet
+from .risk import calc_position_size
+from .strategy import add_indicators, signal_for_index
 
 
 def parse_args() -> argparse.Namespace:

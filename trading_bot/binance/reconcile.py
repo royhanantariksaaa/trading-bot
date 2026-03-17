@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from trading_bot.binance.config import Config
-from trading_bot.binance.exchange import (
+from .config import Config
+from .exchange import (
     SymbolRules,
     fetch_account_snapshot,
     fetch_open_orders,
     fetch_order_by_client_id,
     fetch_recent_trades,
 )
-from trading_bot.binance.models import PositionState, ReconstructedPosition
-from trading_bot.binance.state import BotState, apply_entry_fill, apply_exit_fill, now_iso, remove_open_order, upsert_open_order
+from .models import PositionState, ReconstructedPosition
+from .state import BotState, apply_entry_fill, apply_exit_fill, now_iso, remove_open_order, upsert_open_order
 
 
 def _trade_side(trade: dict) -> str:

@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 import csv
 from pathlib import Path
 
-from trading_bot.binance.models import PositionState
-from trading_bot.binance.state import BotState
+from .models import PositionState
+from .state import BotState
 
 
 @dataclass

@@ -1,19 +1,13 @@
 # Trading Bot
 
-This repo now supports three execution styles for a single-symbol, spot, long-only strategy:
+Multi-venue repo with package-first entrypoints.
 
-- `BOT_MODE=paper` + `EXECUTION_MODE=auto` for autonomous paper trading
-- `BOT_MODE=live` + `EXECUTION_MODE=manual` for supervised live tickets
-- `BOT_MODE=live` + `EXECUTION_MODE=auto` for real Binance Spot execution
+## Venues
 
-The runtime is now position/order driven instead of ticket driven:
+- `trading_bot.binance`: single-symbol spot bot for paper, supervised manual, or live auto execution
+- `trading_bot.polymarket`: paper-first Polymarket market-maker MVP
 
-- persistent `runtime_state.json` stores open position, open orders, daily PnL, cooldown, and last exchange sync
-- manual execution logs update the same runtime state used by the bot
-- live orders use persistent client order ids
-- Binance symbol filters are validated before submit
-- live startup reconciliation reloads balances, open orders, and recent trades
-- live entries arm a protective stop-loss order after the entry fill
+Legacy top-level Python wrappers are gone on purpose. Run the package modules directly.
 
 ## Install
 
@@ -21,7 +15,7 @@ The runtime is now position/order driven instead of ticket driven:
 python -m pip install -r requirements.txt
 ```
 
-## Configure
+## Configure Binance
 
 Copy `.env.example` to `.env` and edit it.
 
@@ -46,58 +40,74 @@ MAX_DAILY_LOSS_USD=1
 MAX_TRADES_PER_DAY=3
 ```
 
-## Venue layout
+## Run Binance bot
 
-- `trading_bot/binance/`: Binance spot bot implementation
-- `trading_bot/polymarket/`: Polymarket market-maker implementation
-- top-level scripts like `python main.py` remain as compatibility shims
-- `polymarket_mm/` remains as a compatibility package pointing at `trading_bot.polymarket`
-
-## Run
+Default package entrypoint:
 
 ```bat
-python main.py
+python -m trading_bot
 ```
 
-Or use the package entrypoint directly:
+Explicit Binance entrypoint:
 
 ```bat
-python -m trading_bot.binance.main
+python -m trading_bot.binance
 ```
 
-## Manual workflow helpers
-
-Update ticket status:
+Direct helper modules:
 
 ```bat
-python update_ticket.py --ticket abc12345 --status approved
-python update_ticket.py --ticket abc12345 --status denied
+python -m trading_bot.binance.backtest --symbol SOL/USDT --timeframe 15m --candles 1000 --use-rsi-filter --rsi-buy-min 52 --rsi-sell-max 48
+python -m trading_bot.binance.update_ticket --ticket abc12345 --status approved
+python -m trading_bot.binance.log_execution --ticket abc12345 --action BUY --symbol SOL/USDT --type entry --price 94.30 --qty 0.053 --fee 0.01 --note "manual Binance fill"
+python -m trading_bot.binance.preview_messages
+python -m trading_bot.binance.review_day
+python -m trading_bot.binance.test_webhook
 ```
 
-Log manual executions and sync runtime state:
+## Run Polymarket market-maker
+
+Copy env file:
 
 ```bat
-python log_execution.py --ticket abc12345 --action BUY --symbol SOL/USDT --type entry --price 94.30 --qty 0.053 --fee 0.01 --note "manual Binance fill"
-python log_execution.py --ticket abc12345 --action SELL --symbol SOL/USDT --type exit --price 96.10 --qty 0.053 --fee 0.01 --note "manual Binance exit"
+copy polymarket_mm\.env.example polymarket_mm\.env
 ```
 
-## Backtest
+Then run:
 
 ```bat
-python backtest.py --symbol SOL/USDT --timeframe 15m --candles 1000 --use-rsi-filter --rsi-buy-min 52 --rsi-sell-max 48
+python -m trading_bot.polymarket
 ```
 
-## Files
+## Runtime model
 
-- `runtime_state.json`: persistent runtime position/order state
+The Binance runtime is position/order driven instead of ticket driven:
+
+- persistent `runtime_state.json` stores open position, open orders, daily PnL, cooldown, and last exchange sync
+- manual execution logs update the same runtime state used by the bot
+- live orders use persistent client order ids
+- Binance symbol filters are validated before submit
+- live startup reconciliation reloads balances, open orders, and recent trades
+- live entries arm a protective stop-loss order after the entry fill
+
+## Output files
+
+- `runtime_state.json`: persistent Binance runtime position/order state
 - `trades.csv`: paper trade log
 - `manual_tickets.csv`: manual ticket journal
 - `decision_log.csv`: approval / denial journal
 - `live_execution_log.csv`: manual execution journal
+- `polymarket_mm/state.json`: default Polymarket state file
+- `polymarket_mm/runs.csv`: default Polymarket loop log
+
+## Notes
+
+- `trading_bot.common` exists only for genuinely shared plumbing. Right now that's just env loading/parsing; no fake abstraction zoo.
+- `polymarket_mm/` is now just config/data/docs territory, not a second Python package.
 
 ## Important limits
 
-This refactor closes the biggest gaps from the docs, but it is still not a finished production platform. In particular:
+Still not a finished production platform:
 
 - live fill truth still relies on REST reconciliation, not a Binance user-data websocket
 - take-profit is software-managed; only stop-loss is armed as a live protective order

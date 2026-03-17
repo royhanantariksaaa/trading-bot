@@ -9,6 +9,10 @@ trading-bot/
   app/
     __main__.py      # `python -m app` -> Binance default entrypoint
     main.py
+    selection/
+      __main__.py    # `python -m app.selection` -> Binance market scan
+      main.py
+      ...
     binance/
       __main__.py    # `python -m app.binance`
       main.py
@@ -87,6 +91,12 @@ python -m app.binance.log_execution --ticket abc12345 --action BUY --symbol SOL/
 python -m app.binance.preview_messages
 python -m app.binance.review_day
 python -m app.binance.test_webhook
+```
+
+Scan Binance markets and export ranked candidates to `data/market/binance_candidates.csv`:
+
+```bat
+python -m app.selection
 ```
 
 ## Run Polymarket

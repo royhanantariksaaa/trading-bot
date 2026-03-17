@@ -34,6 +34,10 @@ def ensure_runtime_directories() -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
+def market_data_path(filename: str) -> Path:
+    return ensure_parent(MARKET_DATA_DIR / filename)
+
+
 def binance_state_path() -> Path:
     return ensure_parent(resolve_env_path("BINANCE_STATE_PATH", STATE_DATA_DIR / "runtime_state.json"))
 

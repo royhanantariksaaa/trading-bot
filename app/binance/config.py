@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..common.env import env_bool
-from ..selection.runtime import default_selection_csv_path
+from ..selection.runtime import RotationController, default_selection_csv_path
 from ..utils.storage import (
     binance_backtest_output_path,
     binance_decision_log_path,
@@ -64,6 +64,8 @@ class Config:
     selection_csv_path: Path = field(
         default_factory=lambda: resolve_project_path(os.getenv("BINANCE_SELECTION_CSV", str(default_selection_csv_path("binance"))))
     )
+    selection_rotation_loops: int = int(os.getenv("BINANCE_SELECTION_ROTATE_EVERY_LOOPS", "0"))
+    selection_rotation_only_when_flat: bool = env_bool(os.getenv("BINANCE_SELECTION_ROTATE_ONLY_WHEN_FLAT"), True)
     state_path: Path = field(default_factory=binance_state_path)
     trades_path: Path = field(default_factory=binance_trades_path)
     tickets_path: Path = field(default_factory=binance_tickets_path)
@@ -82,6 +84,8 @@ class Config:
             raise ValueError("ENTRY_SIZE_MODE must be 'quote_budget' or 'quantity'")
         if self.selection_mode not in {"manual", "csv", "scan"}:
             raise ValueError("BINANCE_SELECTION_MODE must be 'manual', 'csv', or 'scan'")
+        if self.selection_rotation_loops < 0:
+            raise ValueError("BINANCE_SELECTION_ROTATE_EVERY_LOOPS must be >= 0")
         if self.bot_mode == "live" and not self.enable_live_trading:
             raise ValueError("Live mode requires ENABLE_LIVE_TRADING=true")
         if self.bot_mode == "live" and (not self.api_key or not self.api_secret):
@@ -121,3 +125,13 @@ class Config:
         if self.binance_api_base_url:
             return self.binance_api_base_url
         return None
+
+    @property
+    def rotation_controller(self) -> RotationController:
+        enabled = self.selection_mode in {"csv", "scan"} and self.selection_rotation_loops > 0
+        return RotationController(
+            enabled=enabled,
+            every_loops=self.selection_rotation_loops,
+            only_when_flat=self.selection_rotation_only_when_flat,
+            next_due_loop=self.selection_rotation_loops if enabled else 0,
+        )

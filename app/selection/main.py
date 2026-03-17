@@ -8,7 +8,7 @@ from pathlib import Path
 from ..common.env import env_bool
 from ..utils.storage import market_data_path, resolve_project_path
 from .binance import scan_binance_markets
-from .export import write_selection_csv
+from .export import report_paths_from_csv_path, write_selection_csv, write_selection_report, write_selection_report_json
 from .filters import SelectionFilters
 from .polymarket import polymarket_filters, polymarket_scoring, scan_polymarket_markets
 from .scoring import ScoringConfig
@@ -27,7 +27,7 @@ def _parse_quotes(raw: list[str]) -> tuple[str, ...]:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m app.selection",
-        description="Scan Binance or Polymarket markets, score candidates, and export a ranked CSV to data/market/.",
+        description="Scan Binance or Polymarket markets, score candidates, and export ranked CSV/report files to data/market/.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--venue", choices=("binance", "polymarket"), default="binance", help="Venue to scan")
@@ -52,7 +52,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--liquidity-target", type=float, default=50_000_000.0, help="Liquidity target used for scoring")
     parser.add_argument("--trade-count-target", type=float, default=20_000.0, help="Trade-count target used for scoring")
     parser.add_argument("--spread-cap-bps", type=float, default=100.0, help="Worst spread used by scoring")
-    parser.add_argument("--movement-target-pct", type=float, default=5.0, help="Movement target used for scoring")
+    parser.add_argument("--movement-target-pct", type=float, default=5.0, help="Movement target used by scoring")
     parser.add_argument(
         "--testnet",
         action="store_true",
@@ -130,6 +130,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         output_path = _resolve_output_path(args.output, venue)
         write_selection_csv(result, output_path)
+        report_path, report_json_path = report_paths_from_csv_path(output_path)
+        write_selection_report(result, report_path, top=max(3, args.top))
+        write_selection_report_json(result, report_json_path)
     except Exception as exc:
         print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
@@ -144,7 +147,12 @@ def main(argv: list[str] | None = None) -> int:
         )
     if not result.ranked:
         print("No candidates passed the filters.")
+    print("")
+    print("Why this market was chosen")
+    print(result.selected_report())
     print(f"CSV exported to {output_path}")
+    print(f"Report exported to {report_path}")
+    print(f"JSON report exported to {report_json_path}")
     return 0
 
 

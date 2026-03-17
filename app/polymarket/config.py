@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..common.env import env_bool
-from ..selection.runtime import default_selection_csv_path
+from ..selection.runtime import RotationController, default_selection_csv_path
 from ..utils.storage import polymarket_log_path, polymarket_state_path, resolve_project_path
 
 
@@ -28,6 +28,8 @@ class Config:
     selection_csv_path: Path = field(
         default_factory=lambda: resolve_project_path(os.getenv("PM_SELECTION_CSV", str(default_selection_csv_path("polymarket"))))
     )
+    selection_rotation_loops: int = int(os.getenv("PM_SELECTION_ROTATE_EVERY_LOOPS", "0"))
+    selection_rotation_only_when_flat: bool = env_bool(os.getenv("PM_SELECTION_ROTATE_ONLY_WHEN_FLAT"), True)
     state_path: Path = field(default_factory=polymarket_state_path)
     log_path: Path = field(default_factory=polymarket_log_path)
 
@@ -36,6 +38,8 @@ class Config:
             raise ValueError("POLYMARKET_TOKEN_ID is required")
         if self.selection_mode not in {"manual", "csv", "scan"}:
             raise ValueError("PM_SELECTION_MODE must be 'manual', 'csv', or 'scan'")
+        if self.selection_rotation_loops < 0:
+            raise ValueError("PM_SELECTION_ROTATE_EVERY_LOOPS must be >= 0")
         if self.quote_size <= 0:
             raise ValueError("PM_QUOTE_SIZE must be > 0")
         if self.base_spread <= 0 or self.base_spread >= 1:
@@ -50,3 +54,13 @@ class Config:
             raise ValueError("PM_MIN_ORDER_SIZE must be > 0")
         if self.poll_seconds <= 0:
             raise ValueError("PM_POLL_SECONDS must be > 0")
+
+    @property
+    def rotation_controller(self) -> RotationController:
+        enabled = self.selection_mode in {"csv", "scan"} and self.selection_rotation_loops > 0
+        return RotationController(
+            enabled=enabled,
+            every_loops=self.selection_rotation_loops,
+            only_when_flat=self.selection_rotation_only_when_flat,
+            next_due_loop=self.selection_rotation_loops if enabled else 0,
+        )

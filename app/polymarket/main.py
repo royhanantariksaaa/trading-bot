@@ -11,7 +11,8 @@ def _maybe_apply_selected_token(config: Config) -> str | None:
     if selection is None or not selection.market_id:
         raise ValueError(f"No Polymarket market selection available via mode={config.selection_mode}")
     config.token_id = selection.market_id
-    return f"Selection mode {config.selection_mode} picked {selection.symbol} token_id={selection.market_id}"
+    report_note = f" report={selection.report_path}" if selection.report_path else ""
+    return f"Selection mode {config.selection_mode} picked {selection.symbol} token_id={selection.market_id}.{report_note}"
 
 
 def main() -> None:

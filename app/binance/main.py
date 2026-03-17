@@ -4,7 +4,7 @@ import csv
 import time
 from pathlib import Path
 
-from ..selection.runtime import load_runtime_selection, scan_and_select_runtime_market
+from ..selection.runtime import load_runtime_selection, maybe_rotate_runtime_selection, scan_and_select_runtime_market
 from .config import Config
 from .exchange import create_exchange, fetch_account_snapshot, fetch_ohlcv_df, get_market_rules, prepare_htf_rsi_filter
 from .execution import create_manual_ticket, ensure_live_stop_loss, execute_live_entry, execute_live_exit, execute_paper_entry, execute_paper_exit
@@ -149,11 +149,27 @@ def _maybe_apply_selected_symbol(config: Config) -> str | None:
     if selection is None or not selection.symbol:
         raise ValueError(f"No Binance market selection available via mode={config.selection_mode}")
     config.symbol = selection.symbol
-    return f"Selection mode {config.selection_mode} picked {selection.symbol} ({selection.source})"
+    report_note = f" report={selection.report_path}" if selection.report_path else ""
+    return f"Selection mode {config.selection_mode} picked {selection.symbol} ({selection.source}).{report_note}"
+
+
+def _can_rotate_symbol(config: Config, state) -> tuple[bool, str]:
+    if config.selection_mode == "manual":
+        return False, "rotation disabled in manual selection mode"
+    if not config.rotation_controller.only_when_flat:
+        return True, "rotation allowed"
+    if state.position is not None:
+        return False, "rotation skipped: open position"
+    if state.open_orders:
+        return False, "rotation skipped: open orders present"
+    if state.pending_ticket_id:
+        return False, "rotation skipped: pending manual ticket"
+    return True, "rotation allowed while flat"
 
 
 def run_bot(config: Config) -> None:
     selection_note = _maybe_apply_selected_symbol(config)
+    rotation = config.rotation_controller
     exchange = create_exchange(config)
     market_rules = get_market_rules(exchange, config.symbol)
     trades_path = config.trades_path
@@ -227,6 +243,29 @@ def run_bot(config: Config) -> None:
                     state.account_snapshot = fetch_account_snapshot(exchange, market_rules)
                 if config.execution_mode == "auto" and state.position is not None:
                     ensure_live_stop_loss(exchange=exchange, config=config, state=state, rules=market_rules, candle_time=state.last_signal_candle_time or today_str())
+
+            if rotation.should_rotate(loops):
+                allowed, reason = _can_rotate_symbol(config, state)
+                if allowed:
+                    decision = maybe_rotate_runtime_selection(
+                        "binance",
+                        mode=config.selection_mode,
+                        output_path=config.selection_csv_path,
+                        current_symbol=config.symbol,
+                    )
+                    if decision.changed and decision.selection is not None:
+                        config.symbol = decision.selection.symbol
+                        market_rules = get_market_rules(exchange, config.symbol)
+                        if config.use_htf_filter:
+                            htf1 = prepare_htf_rsi_filter(exchange, config.symbol, config.htf_1_timeframe, config.htf_1_rsi_period, config.htf_1_rsi_min)
+                            if config.htf_2_enabled:
+                                htf2 = prepare_htf_rsi_filter(exchange, config.symbol, config.htf_2_timeframe, config.htf_2_rsi_period, config.htf_2_rsi_min)
+                        send_status(notifier, f"Selector rotation applied: {decision.reason}. report={decision.selection.report_path}")
+                    else:
+                        log_event("INFO", f"Selector rotation check: {decision.reason}")
+                else:
+                    log_event("INFO", reason)
+                rotation.mark_executed(loops)
 
             if state.realized_pnl_today <= -config.max_daily_loss_usd:
                 send_status(

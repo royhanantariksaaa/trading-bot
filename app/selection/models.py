@@ -48,6 +48,23 @@ class MarketCandidate:
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
+@dataclass(slots=True)
+class ScoreComponent:
+    name: str
+    raw_value: float | None = None
+    score: float = 0.0
+    weight: float = 0.0
+    contribution: float = 0.0
+    detail: str = ""
+
+
+@dataclass(slots=True)
+class ScorePenalty:
+    name: str
+    points: float = 0.0
+    reason: str = ""
+
+
 @runtime_checkable
 class MarketScanner(Protocol):
     venue: str

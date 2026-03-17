@@ -93,17 +93,25 @@ python -m app.binance.review_day
 python -m app.binance.test_webhook
 ```
 
-Scan Binance markets and export ranked candidates to `data/market/binance_candidates.csv`:
+Scan Binance markets and export ranked candidates to `data/market/binance_candidates.csv` plus human-readable report files:
 
 ```bat
 python -m app.selection --venue binance
 ```
 
-Scan Polymarket YES outcomes using Gamma + live CLOB books and export ranked candidates to `data/market/polymarket_candidates.csv`:
+Scan Polymarket YES outcomes using Gamma + live CLOB books and export ranked candidates to `data/market/polymarket_candidates.csv` plus report files:
 
 ```bat
 python -m app.selection --venue polymarket --allowed-quotes USDC --min-quote-volume 5000 --min-trade-count 0 --max-spread-bps 800 --book-limit 25
 ```
+
+Each scan now writes three artifacts by default:
+
+- `data/market/<venue>_candidates.csv`
+- `data/market/<venue>_candidates_report.txt`
+- `data/market/<venue>_candidates_report.json`
+
+The CLI also prints a `Why this market was chosen` summary for the selected market.
 
 ## Run Polymarket
 
@@ -120,7 +128,14 @@ Optional runtime auto-pick modes:
 - `PM_SELECTION_MODE=csv` -> load the first accepted row from `data/market/polymarket_candidates.csv`
 - `PM_SELECTION_MODE=scan` -> rescan at startup, write `data/market/polymarket_candidates.csv`, and use the selected Polymarket token id
 
-Manual `SYMBOL` and `POLYMARKET_TOKEN_ID` still work as before when the selection mode stays `manual`.
+Optional conservative runtime rotation:
+
+- `BINANCE_SELECTION_ROTATE_EVERY_LOOPS=<n>` -> every `n` bot loops, re-check selection while running
+- `BINANCE_SELECTION_ROTATE_ONLY_WHEN_FLAT=true` -> only rotate when no position, no open orders, and no pending manual ticket
+- `PM_SELECTION_ROTATE_EVERY_LOOPS=<n>` -> every `n` maker loops, re-check the market while running
+- `PM_SELECTION_ROTATE_ONLY_WHEN_FLAT=true` -> only rotate when inventory is flat
+
+Manual `SYMBOL` and `POLYMARKET_TOKEN_ID` still work as before when the selection mode stays `manual`. Rotation is off by default, so existing manual flows stay untouched.
 
 The `polymarket_mm/` folder is docs plus config examples for that loop. It is not a Python package.
 

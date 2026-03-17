@@ -4,12 +4,14 @@ import csv
 import unittest
 from pathlib import Path
 
+from app.binance.config import Config as BinanceConfig
+from app.polymarket.config import Config as PolymarketConfig
 from app.selection.binance import BinanceMarketScanner
-from app.selection.export import write_selection_csv
+from app.selection.export import report_paths_from_csv_path, write_selection_csv, write_selection_report, write_selection_report_json
 from app.selection.filters import SelectionFilters
 from app.selection.models import MarketCandidate, MarketConstraints, MarketMetrics
 from app.selection.polymarket import PolymarketMarketScanner, scan_polymarket_markets
-from app.selection.runtime import load_runtime_selection
+from app.selection.runtime import RotationController, load_runtime_selection, maybe_rotate_runtime_selection
 from app.selection.scoring import ScoringConfig
 from app.selection.selector import MarketSelectionConfig, select_markets
 
@@ -17,6 +19,7 @@ from app.selection.selector import MarketSelectionConfig, select_markets
 def make_candidate(
     symbol: str,
     *,
+    venue: str = "binance",
     base_asset: str = "SOL",
     quote_asset: str = "USDT",
     last_price: float = 100.0,
@@ -31,13 +34,13 @@ def make_candidate(
     qty_step: float = 0.01,
 ) -> MarketCandidate:
     return MarketCandidate(
-        venue="binance",
+        venue=venue,
         symbol=symbol,
-        market_id=symbol.replace("/", ""),
+        market_id=symbol.replace("/", "").replace(":", "_"),
         base_asset=base_asset,
         quote_asset=quote_asset,
-        market_type="spot",
-        status="TRADING",
+        market_type="binary" if venue == "polymarket" else "spot",
+        status="ACTIVE" if venue == "polymarket" else "TRADING",
         active=True,
         tradable=True,
         constraints=MarketConstraints(
@@ -96,7 +99,25 @@ class SelectionTest(unittest.TestCase):
         self.assertFalse(result.evaluated[2].accepted)
         self.assertFalse(result.evaluated[3].accepted)
 
-    def test_csv_export_writes_ranked_rows(self) -> None:
+    def test_explainable_scores_include_components_penalties_and_report(self) -> None:
+        result = select_markets(
+            [
+                make_candidate("SOL/USDT", volume_quote_24h=45_000_000.0, trade_count_24h=30_000, spread_bps=6.0, range_pct_24h=4.5),
+                make_candidate("DOGE/USDT", volume_quote_24h=20_000_000.0, trade_count_24h=8_000, spread_bps=32.0, range_pct_24h=16.0),
+            ],
+            MarketSelectionConfig(filters=SelectionFilters(allowed_quotes=("USDT",), max_entry_notional=5.0), scoring=ScoringConfig()),
+            venue="binance",
+            scanned_at="2026-03-18T00:00:00+00:00",
+        )
+        best = result.selected
+        assert best is not None
+        self.assertGreaterEqual(len(best.score_breakdown.components), 5)
+        self.assertTrue(any(component.name == "depth" for component in best.score_breakdown.components))
+        self.assertIn("scored", " ".join(best.score_breakdown.explanation))
+        other = result.ranked[1]
+        self.assertTrue(any(penalty.name == "wide_spread" for penalty in other.score_breakdown.penalty_items))
+
+    def test_csv_export_writes_ranked_rows_and_report_paths(self) -> None:
         result = select_markets(
             [make_candidate("SOL/USDT"), make_candidate("ADA/USDT", base_asset="ADA", volume_quote_24h=25_000_000.0, spread_bps=250.0)],
             MarketSelectionConfig(filters=SelectionFilters(allowed_quotes=("USDT",), max_entry_notional=5.0)),
@@ -105,19 +126,85 @@ class SelectionTest(unittest.TestCase):
         )
 
         path = Path(__file__).resolve().parent / ".tmp_selection_candidates.csv"
+        report_path, report_json_path = report_paths_from_csv_path(path)
         try:
             write_selection_csv(result, path)
+            write_selection_report(result, report_path)
+            write_selection_report_json(result, report_json_path)
             with path.open("r", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
         finally:
-            if path.exists():
-                path.unlink()
+            for item in (path, report_path, report_json_path):
+                if item.exists():
+                    item.unlink()
 
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["symbol"], "SOL/USDT")
         self.assertEqual(rows[0]["accepted"], "true")
         self.assertIn("score_total", rows[0])
         self.assertIn("filter_failures", rows[0])
+        self.assertIn("score_explanation", rows[0])
+
+    def test_runtime_selection_reads_explanation_from_csv(self) -> None:
+        result = select_markets(
+            [make_candidate("SOL/USDT")],
+            MarketSelectionConfig(filters=SelectionFilters(allowed_quotes=("USDT",), max_entry_notional=5.0)),
+            venue="binance",
+            scanned_at="2026-03-18T00:00:00+00:00",
+        )
+        path = Path(__file__).resolve().parent / ".tmp_runtime_selection.csv"
+        try:
+            write_selection_csv(result, path)
+            selection = load_runtime_selection(path, venue="binance")
+        finally:
+            if path.exists():
+                path.unlink()
+        self.assertIsNotNone(selection)
+        assert selection is not None
+        self.assertEqual(selection.symbol, "SOL/USDT")
+        self.assertIn("score", selection.summary)
+        self.assertIn("scored", selection.explanation)
+
+    def test_rotation_decision_detects_symbol_change(self) -> None:
+        result = select_markets(
+            [make_candidate("ADA/USDT"), make_candidate("SOL/USDT", volume_quote_24h=5_000_000.0)],
+            MarketSelectionConfig(filters=SelectionFilters(allowed_quotes=("USDT",), max_entry_notional=5.0)),
+            venue="binance",
+            scanned_at="2026-03-18T00:00:00+00:00",
+        )
+        path = Path(__file__).resolve().parent / ".tmp_rotation_selection.csv"
+        report_path, report_json_path = report_paths_from_csv_path(path)
+        try:
+            write_selection_csv(result, path)
+            write_selection_report(result, report_path)
+            write_selection_report_json(result, report_json_path)
+            decision = maybe_rotate_runtime_selection("binance", mode="csv", output_path=path, current_symbol="SOL/USDT")
+        finally:
+            for item in (path, report_path, report_json_path):
+                if item.exists():
+                    item.unlink()
+        self.assertTrue(decision.changed)
+        self.assertEqual(decision.new_symbol, "ADA/USDT")
+        self.assertIsNotNone(decision.selection)
+
+    def test_rotation_controller_schedule(self) -> None:
+        controller = RotationController(enabled=True, every_loops=3, next_due_loop=3)
+        self.assertFalse(controller.should_rotate(2))
+        self.assertTrue(controller.should_rotate(3))
+        controller.mark_executed(3)
+        self.assertEqual(controller.next_due_loop, 6)
+
+    def test_binance_config_rotation_defaults(self) -> None:
+        config = BinanceConfig(selection_mode="scan", selection_rotation_loops=5)
+        controller = config.rotation_controller
+        self.assertTrue(controller.enabled)
+        self.assertEqual(controller.every_loops, 5)
+
+    def test_polymarket_config_rotation_defaults(self) -> None:
+        config = PolymarketConfig(token_id="abc", selection_mode="csv", selection_rotation_loops=2)
+        controller = config.rotation_controller
+        self.assertTrue(controller.enabled)
+        self.assertEqual(controller.next_due_loop, 2)
 
     def test_binance_scanner_normalizes_candidate_metadata(self) -> None:
         class FakeExchange:
@@ -252,17 +339,22 @@ class SelectionTest(unittest.TestCase):
         result = scan_polymarket_markets(client=FakePolymarketClient(), limit=5, book_limit=5)
         self.assertIsNotNone(result.selected)
         path = Path(__file__).resolve().parent / ".tmp_polymarket_candidates.csv"
+        report_path, report_json_path = report_paths_from_csv_path(path)
         try:
             write_selection_csv(result, path)
+            write_selection_report(result, report_path)
+            write_selection_report_json(result, report_json_path)
             selection = load_runtime_selection(path, venue="polymarket")
         finally:
-            if path.exists():
-                path.unlink()
+            for item in (path, report_path, report_json_path):
+                if item.exists():
+                    item.unlink()
 
         self.assertIsNotNone(selection)
         assert selection is not None
         self.assertEqual(selection.market_id, "yes-token")
         self.assertEqual(selection.symbol, "fed-cuts-rates:YES")
+        self.assertTrue(selection.report_path is None or selection.report_path.name.endswith("_report.txt"))
 
 
 if __name__ == "__main__":

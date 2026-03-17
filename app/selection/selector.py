@@ -27,6 +27,17 @@ class ScoredCandidate:
     filter_decisions: tuple = field(default_factory=tuple)
     rank: int | None = None
 
+    def why_lines(self) -> tuple[str, ...]:
+        lines = [
+            f"{self.candidate.symbol} [{self.candidate.venue}] accepted={self.accepted} rank={self.rank or '-'} score={self.score:.2f}",
+            *self.score_breakdown.explanation,
+        ]
+        if not self.accepted:
+            failures = failed_filter_reasons(self.filter_decisions)
+            if failures:
+                lines.append(f"Rejected by filters: {failures}")
+        return tuple(lines)
+
 
 @dataclass(slots=True)
 class SelectionResult:
@@ -50,6 +61,11 @@ class SelectionResult:
             f"venue={self.venue or 'unknown'} scanned={len(self.evaluated)} "
             f"accepted={self.accepted_count} rejected={self.rejected_count} selected={best}"
         )
+
+    def selected_report(self) -> str:
+        if self.selected is None:
+            return f"No market selected for venue={self.venue or 'unknown'} after evaluating {len(self.evaluated)} candidates."
+        return "\n".join(self.selected.why_lines())
 
 
 class MarketSelector:

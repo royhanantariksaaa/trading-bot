@@ -6,6 +6,7 @@ import math
 import time
 from pathlib import Path
 
+from ..selection.runtime import maybe_rotate_runtime_selection
 from .config import Config
 from .models import BotState, BookSnapshot, FillResult, QuotePlan, utc_now
 
@@ -121,12 +122,41 @@ def apply_fill(state: BotState, fill: FillResult) -> None:
     state.updated_at = utc_now()
 
 
+def _can_rotate_market(config: Config, state: BotState) -> tuple[bool, str]:
+    if config.selection_mode == "manual":
+        return False, "rotation disabled in manual selection mode"
+    if not config.rotation_controller.only_when_flat:
+        return True, "rotation allowed"
+    if abs(state.inventory) > 1e-9:
+        return False, "rotation skipped: non-flat inventory"
+    return True, "rotation allowed while flat"
+
+
 def run_loop(config: Config, client) -> None:
     config.validate()
     state = load_state(config.state_path)
+    rotation = config.rotation_controller
 
     remaining = config.loops
     while True:
+        if rotation.should_rotate(state.loops):
+            allowed, reason = _can_rotate_market(config, state)
+            if allowed:
+                decision = maybe_rotate_runtime_selection(
+                    "polymarket",
+                    mode=config.selection_mode,
+                    output_path=config.selection_csv_path,
+                    current_market_id=config.token_id,
+                )
+                if decision.changed and decision.selection is not None:
+                    config.token_id = decision.selection.market_id
+                    print(f"rotation_applied token_id={config.token_id} report={decision.selection.report_path}")
+                else:
+                    print(f"rotation_check {decision.reason}")
+            else:
+                print(reason)
+            rotation.mark_executed(state.loops)
+
         book = client.get_book(config.token_id)
         state.last_mid = book.midpoint
         plan = compute_quote_plan(config, state, book)

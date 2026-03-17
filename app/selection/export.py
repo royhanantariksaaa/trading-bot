@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 from .selector import ScoredCandidate, SelectionResult
@@ -24,6 +25,11 @@ CSV_COLUMNS = [
     "score_spread",
     "score_activity",
     "score_movement",
+    "score_depth",
+    "score_accessibility",
+    "score_stability",
+    "score_penalties",
+    "score_explanation",
     "filter_failures",
     "last_price",
     "bid",
@@ -80,6 +86,11 @@ def candidate_to_row(item: ScoredCandidate) -> dict[str, str]:
         "score_spread": _format_value(item.score_breakdown.spread),
         "score_activity": _format_value(item.score_breakdown.activity),
         "score_movement": _format_value(item.score_breakdown.movement),
+        "score_depth": _format_value(item.score_breakdown.depth),
+        "score_accessibility": _format_value(item.score_breakdown.accessibility),
+        "score_stability": _format_value(item.score_breakdown.stability),
+        "score_penalties": _format_value(item.score_breakdown.penalties),
+        "score_explanation": " | ".join(item.score_breakdown.explanation),
         "filter_failures": " | ".join(failures),
         "last_price": _format_value(metrics.last_price),
         "bid": _format_value(metrics.bid),
@@ -103,6 +114,43 @@ def candidate_to_row(item: ScoredCandidate) -> dict[str, str]:
     }
 
 
+def _report_payload(result: SelectionResult) -> dict:
+    def component_to_dict(component):
+        return {
+            "name": component.name,
+            "raw_value": component.raw_value,
+            "score": component.score,
+            "weight": component.weight,
+            "contribution": component.contribution,
+            "detail": component.detail,
+        }
+
+    def penalty_to_dict(penalty):
+        return {"name": penalty.name, "points": penalty.points, "reason": penalty.reason}
+
+    selected = None
+    if result.selected is not None:
+        item = result.selected
+        selected = {
+            "symbol": item.candidate.symbol,
+            "market_id": item.candidate.market_id,
+            "score": item.score,
+            "rank": item.rank,
+            "explanation": list(item.score_breakdown.explanation),
+            "components": [component_to_dict(component) for component in item.score_breakdown.components],
+            "penalties": [penalty_to_dict(penalty) for penalty in item.score_breakdown.penalty_items],
+            "filter_failures": [f"{decision.name}:{decision.reason}" for decision in item.filter_decisions if not decision.passed],
+        }
+
+    return {
+        "scanned_at": result.scanned_at,
+        "venue": result.venue,
+        "summary": result.summary(),
+        "selected": selected,
+        "ranked_symbols": [item.candidate.symbol for item in result.ranked],
+    }
+
+
 def write_selection_csv(result: SelectionResult, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     ordered = sorted(
@@ -119,4 +167,47 @@ def write_selection_csv(result: SelectionResult, path: Path) -> Path:
         writer.writeheader()
         for item in ordered:
             writer.writerow(candidate_to_row(item))
+    return path
+
+
+def report_paths_from_csv_path(path: Path) -> tuple[Path, Path]:
+    base = path.with_suffix("")
+    return (base.with_name(base.name + "_report.txt"), base.with_name(base.name + "_report.json"))
+
+
+def build_selection_report(result: SelectionResult, *, top: int = 5) -> str:
+    lines = [
+        f"Selection report for venue={result.venue} at {result.scanned_at}",
+        result.summary(),
+        "",
+    ]
+    if result.selected is None:
+        lines.append("No candidate passed the filters.")
+    else:
+        lines.append("Chosen market")
+        lines.extend(f"- {line}" for line in result.selected.why_lines())
+        lines.append("")
+    if result.ranked:
+        lines.append(f"Top {min(top, len(result.ranked))} ranked candidates")
+        for item in result.ranked[: max(1, top)]:
+            parts = ", ".join(
+                f"{component.name}={component.score:.1f}"
+                for component in sorted(item.score_breakdown.components, key=lambda value: value.contribution, reverse=True)[:3]
+            )
+            penalties = ", ".join(f"{penalty.name}:-{penalty.points:.1f}" for penalty in item.score_breakdown.penalty_items) or "none"
+            lines.append(f"- #{item.rank} {item.candidate.symbol} score={item.score:.2f} drivers=[{parts}] penalties=[{penalties}]")
+    else:
+        lines.append("Top ranked candidates: none")
+    return "\n".join(lines).strip() + "\n"
+
+
+def write_selection_report(result: SelectionResult, path: Path, *, top: int = 5) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(build_selection_report(result, top=top), encoding="utf-8")
+    return path
+
+
+def write_selection_report_json(result: SelectionResult, path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(_report_payload(result), indent=2), encoding="utf-8")
     return path

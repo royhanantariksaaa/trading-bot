@@ -1,0 +1,3 @@
+ticket_id,created_at,action,symbol,timeframe,price,qty,notional_usd,stop_loss,take_profit,reason,rsi,status
+preview01,2026-03-17T15:38:25,BUY,SOL/USDT,15m,94.3,0.053,5.0,92.414,97.129,preview buy ticket | ema9 > ema21 | htf pass,53.2,executed
+preview02,2026-03-17T15:38:25,SELL,SOL/USDT,15m,96.12,0.053,5.0944,92.414,97.129,preview sell ticket | take profit zone,47.1,pending

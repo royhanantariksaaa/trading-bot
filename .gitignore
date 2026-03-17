@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.csv
+runtime_state.json
+*.db
+tests/.tmp_runtime_state.json

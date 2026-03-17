@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import csv
 import uuid
@@ -37,11 +37,32 @@ class ExecutionRecord:
     qty: float
     notional_usd: float
     fee_usd: float
+    order_id: str = ""
+    client_order_id: str = ""
+    fill_source: str = "manual"
     notes: str = ""
 
 
 def new_ticket_id() -> str:
     return uuid.uuid4().hex[:8]
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def list_tickets(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    with path.open("r", newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def get_ticket(path: Path, ticket_id: str) -> dict | None:
+    for row in list_tickets(path):
+        if row.get("ticket_id") == ticket_id:
+            return row
+    return None
 
 
 def append_ticket(path: Path, ticket: ManualTicket) -> None:
@@ -52,7 +73,7 @@ def append_ticket(path: Path, ticket: ManualTicket) -> None:
         if not exists:
             writer.writerow([
                 "ticket_id", "created_at", "action", "symbol", "timeframe", "price", "qty", "notional_usd",
-                "stop_loss", "take_profit", "reason", "rsi", "status"
+                "stop_loss", "take_profit", "reason", "rsi", "status",
             ])
         writer.writerow([
             ticket.ticket_id,
@@ -114,7 +135,21 @@ def append_execution_log(path: Path, record: ExecutionRecord) -> None:
     with path.open("a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         if not exists:
-            writer.writerow(["timestamp", "ticket_id", "action", "symbol", "execution_type", "price", "qty", "notional_usd", "fee_usd", "notes"])
+            writer.writerow([
+                "timestamp",
+                "ticket_id",
+                "action",
+                "symbol",
+                "execution_type",
+                "price",
+                "qty",
+                "notional_usd",
+                "fee_usd",
+                "order_id",
+                "client_order_id",
+                "fill_source",
+                "notes",
+            ])
         writer.writerow([
             record.timestamp,
             record.ticket_id,
@@ -125,6 +160,9 @@ def append_execution_log(path: Path, record: ExecutionRecord) -> None:
             round(record.qty, 8),
             round(record.notional_usd, 6),
             round(record.fee_usd, 6),
+            record.order_id,
+            record.client_order_id,
+            record.fill_source,
             record.notes,
         ])
 
@@ -192,7 +230,3 @@ def build_daily_summary(
         f"Pending ticket: `{pending}`\n"
         f"Last ticket: `{last_ticket}`"
     )
-
-
-def now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")

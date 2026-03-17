@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from state import clear_pending_ticket, load_state, save_state
 from tickets import VALID_TICKET_STATUSES, append_decision_log, update_ticket_status
 
 
@@ -15,10 +16,16 @@ def main() -> None:
 
     tickets_path = Path("manual_tickets.csv")
     decision_log_path = Path("decision_log.csv")
+    state_path = Path("runtime_state.json")
 
     updated = update_ticket_status(tickets_path, args.ticket, args.status)
     if not updated:
         raise SystemExit(f"Ticket not found: {args.ticket}")
+
+    state = load_state(state_path)
+    if state.pending_ticket_id == args.ticket and args.status in {"approved", "denied", "expired", "skipped", "executed", "closed"}:
+        clear_pending_ticket(state)
+        save_state(state_path, state)
 
     append_decision_log(decision_log_path, args.ticket, args.status, note=args.note or "ticket status updated")
     print(f"Updated ticket {args.ticket} -> {args.status}")

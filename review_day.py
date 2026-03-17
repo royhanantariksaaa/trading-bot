@@ -3,11 +3,11 @@ from __future__ import annotations
 import csv
 from collections import Counter
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def today_str() -> str:
-    return datetime.now().strftime("%Y-%m-%d")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
 def count_csv_rows_today(path: Path, timestamp_field: str) -> list[dict]:

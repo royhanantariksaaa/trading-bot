@@ -102,6 +102,8 @@ def main() -> None:
     wallet = PaperWallet(
         balance_usdt=config.starting_balance,
         trades_path=Path(args.output),
+        fee_rate=config.fee_rate,
+        slippage_pct=config.slippage_buffer_pct,
     )
 
     trade_count = 0
@@ -142,25 +144,25 @@ def main() -> None:
 
         if wallet.position is not None:
             if price <= wallet.position.stop_loss:
-                pnl = wallet.exit_long(price, i, note="stop_loss")
+                _, _, pnl = wallet.exit_long(price, note="stop_loss")
                 trade_count += 1
                 realized_pnl += pnl
                 win_count += 1 if pnl > 0 else 0
                 loss_count += 1 if pnl <= 0 else 0
             elif price >= wallet.position.take_profit:
-                pnl = wallet.exit_long(price, i, note="take_profit")
+                _, _, pnl = wallet.exit_long(price, note="take_profit")
                 trade_count += 1
                 realized_pnl += pnl
                 win_count += 1 if pnl > 0 else 0
                 loss_count += 1 if pnl <= 0 else 0
             elif signal == "sell":
-                pnl = wallet.exit_long(price, i, note="ema_cross_down")
+                _, _, pnl = wallet.exit_long(price, note="ema_cross_down")
                 trade_count += 1
                 realized_pnl += pnl
                 win_count += 1 if pnl > 0 else 0
                 loss_count += 1 if pnl <= 0 else 0
         else:
-            if signal == "buy" and htf_ok and wallet.can_enter(i, config.cooldown_candles):
+            if signal == "buy" and htf_ok and wallet.can_enter():
                 qty = calc_position_size(
                     wallet.balance_usdt,
                     config.risk_per_trade,
@@ -182,7 +184,7 @@ def main() -> None:
 
     last_price = float(df.iloc[-1]["close"])
     if wallet.position is not None:
-        pnl = wallet.exit_long(last_price, len(df) - 1, note="forced_end_of_backtest")
+        _, _, pnl = wallet.exit_long(last_price, note="forced_end_of_backtest")
         trade_count += 1
         realized_pnl += pnl
         win_count += 1 if pnl > 0 else 0

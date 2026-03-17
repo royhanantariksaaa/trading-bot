@@ -86,7 +86,7 @@ def main() -> None:
 
     exchange = create_exchange(config)
     df = fetch_ohlcv_df(exchange, config.symbol, config.timeframe, limit=args.candles)
-    df = add_indicators(df, rsi_period=config.rsi_period)
+    df = add_indicators(df, fast=config.ema_fast_period, slow=config.ema_slow_period, rsi_period=config.rsi_period)
 
     htf_columns = []
     if config.use_htf_filter:
@@ -114,7 +114,7 @@ def main() -> None:
     peak_balance = wallet.balance_usdt
     max_drawdown_pct = 0.0
 
-    strategy_label = "EMA 9/21"
+    strategy_label = f"EMA {config.ema_fast_period}/{config.ema_slow_period}"
     if config.use_rsi_filter:
         strategy_label += f" + RSI({config.rsi_period}) buy>={config.rsi_buy_min:.1f} sell<={config.rsi_sell_max:.1f}"
     if config.use_htf_filter:
@@ -126,7 +126,8 @@ def main() -> None:
         f"Starting backtest | symbol={config.symbol} tf={config.timeframe} candles={len(df)} balance={config.starting_balance:.2f} risk={fmt_pct(config.risk_per_trade)} sl={fmt_pct(config.stop_loss_pct)} tp={fmt_pct(config.take_profit_pct)} cooldown={config.cooldown_candles} strategy={strategy_label}",
     )
 
-    for i in range(21, len(df)):
+    start_index = max(config.ema_slow_period, config.rsi_period) + 1
+    for i in range(start_index, len(df)):
         row = df.iloc[i]
         price = float(row["close"])
         signal = signal_for_index(

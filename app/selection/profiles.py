@@ -15,12 +15,18 @@ _OVERRIDE_FIELDS = (
     "stop_loss_pct",
     "take_profit_pct",
     "cooldown_candles",
+    "timeframe",
+    "ema_fast_period",
+    "ema_slow_period",
+    "rsi_period",
     "use_rsi_filter",
     "rsi_buy_min",
     "rsi_sell_max",
     "use_htf_filter",
+    "htf_1_timeframe",
     "htf_1_rsi_min",
     "htf_2_enabled",
+    "htf_2_timeframe",
     "htf_2_rsi_min",
     "signal_on_closed_candle",
 )
@@ -152,12 +158,18 @@ class StrategyProfileSelection:
     stop_loss_pct: float | None = None
     take_profit_pct: float | None = None
     cooldown_candles: int | None = None
+    timeframe: str | None = None
+    ema_fast_period: int | None = None
+    ema_slow_period: int | None = None
+    rsi_period: int | None = None
     use_rsi_filter: bool | None = None
     rsi_buy_min: float | None = None
     rsi_sell_max: float | None = None
     use_htf_filter: bool | None = None
+    htf_1_timeframe: str | None = None
     htf_1_rsi_min: float | None = None
     htf_2_enabled: bool | None = None
+    htf_2_timeframe: str | None = None
     htf_2_rsi_min: float | None = None
     signal_on_closed_candle: bool | None = None
 
@@ -215,12 +227,18 @@ class StrategyProfileSelection:
             stop_loss_pct=_to_float(payload.get("stop_loss_pct")),
             take_profit_pct=_to_float(payload.get("take_profit_pct")),
             cooldown_candles=_to_int(payload.get("cooldown_candles")),
+            timeframe=_to_str(payload.get("timeframe")),
+            ema_fast_period=_to_int(payload.get("ema_fast_period")),
+            ema_slow_period=_to_int(payload.get("ema_slow_period")),
+            rsi_period=_to_int(payload.get("rsi_period")),
             use_rsi_filter=_to_bool(payload.get("use_rsi_filter")),
             rsi_buy_min=_to_float(payload.get("rsi_buy_min")),
             rsi_sell_max=_to_float(payload.get("rsi_sell_max")),
             use_htf_filter=_to_bool(payload.get("use_htf_filter")),
+            htf_1_timeframe=_to_str(payload.get("htf_1_timeframe")),
             htf_1_rsi_min=_to_float(payload.get("htf_1_rsi_min")),
             htf_2_enabled=_to_bool(payload.get("htf_2_enabled")),
+            htf_2_timeframe=_to_str(payload.get("htf_2_timeframe")),
             htf_2_rsi_min=_to_float(payload.get("htf_2_rsi_min")),
             signal_on_closed_candle=_to_bool(payload.get("signal_on_closed_candle")),
         )
@@ -254,6 +272,12 @@ def _to_int(value: Any) -> int | None:
         return int(float(value))
     except (TypeError, ValueError):
         return None
+
+
+def _to_str(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    return str(value)
 
 
 def _to_bool(value: Any) -> bool | None:
@@ -385,4 +409,3 @@ def build_strategy_profile(profile_name: str, venue: str, metrics: MarketMetrics
 
 def select_strategy_profile(venue: str, metrics: MarketMetrics) -> StrategyProfileSelection | None:
     return build_strategy_profile("auto", venue, metrics)
-

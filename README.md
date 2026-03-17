@@ -104,10 +104,13 @@ Auto-select the Binance market and profile at startup:
 ```bat
 set BINANCE_SELECTION_MODE=scan
 set BINANCE_STRATEGY_PROFILE=auto
+set BINANCE_ADAPTIVE_MODE=paper
 python -m app.binance
 ```
 
 When `BINANCE_SELECTION_MODE` is `csv` or `scan`, the selected market is also classified into a conservative profile (`trend`, `range`, `volatile`, or `slow_liquid`) and that profile is applied before the bot starts. Use `BINANCE_STRATEGY_PROFILE=manual` to keep the base manual strategy settings, or set `BINANCE_STRATEGY_PROFILE=<profile>` to force one.
+
+If you also set `BINANCE_ADAPTIVE_MODE=paper`, Binance will do a second conservative pass using recent OHLCV candles and ticker spread data, then layer one of the bounded adaptive policies on top of the selected market profile. That adaptive pass only runs in paper mode unless you explicitly set `BINANCE_ADAPTIVE_MODE=on`.
 
 Scan Polymarket YES outcomes using Gamma + live CLOB books and export ranked candidates to `data/market/polymarket_candidates.csv` plus report files:
 
@@ -138,6 +141,8 @@ Optional runtime auto-pick modes:
 - `BINANCE_STRATEGY_PROFILE=auto` -> apply the profile chosen from the selected market regime
 - `BINANCE_STRATEGY_PROFILE=manual` -> keep the existing manual strategy values even when selection mode is `csv` or `scan`
 - `BINANCE_STRATEGY_PROFILE=trend|range|volatile|slow_liquid` -> force a specific profile
+- `BINANCE_ADAPTIVE_MODE=paper` -> apply the recent-history adaptive overlay only in paper mode
+- `BINANCE_ADAPTIVE_MODE=on` -> apply the recent-history adaptive overlay in paper or live mode
 - `PM_SELECTION_MODE=csv` -> load the first accepted row from `data/market/polymarket_candidates.csv`
 - `PM_SELECTION_MODE=scan` -> rescan at startup, write `data/market/polymarket_candidates.csv`, and use the selected Polymarket token id
 
@@ -173,11 +178,13 @@ Defaults live under `data/`:
 - `data/logs/decision_log.csv`: Binance approval / denial journal
 - `data/logs/live_execution_log.csv`: Binance manual execution journal
 - `data/backtests/backtest_trades.csv`: default Binance backtest output
+- `data/market/binance_adaptive_report.txt`: latest Binance adaptive decision report
+- `data/market/binance_adaptive_report.json`: machine-readable adaptive decision report
 - `data/state/polymarket_state.json`: Polymarket state file
 - `data/logs/polymarket_runs.csv`: Polymarket loop log
 - `data/market/`: ad hoc market CSV snapshots and local samples
 
-All of those paths can be overridden with env vars such as `BINANCE_STATE_PATH`, `BINANCE_TRADES_PATH`, `BINANCE_BACKTEST_OUTPUT_PATH`, `PM_STATE_PATH`, and `PM_LOG_PATH`.
+All of those paths can be overridden with env vars such as `BINANCE_STATE_PATH`, `BINANCE_TRADES_PATH`, `BINANCE_BACKTEST_OUTPUT_PATH`, `BINANCE_ADAPTIVE_REPORT_PATH`, `PM_STATE_PATH`, and `PM_LOG_PATH`.
 
 ## Notes
 

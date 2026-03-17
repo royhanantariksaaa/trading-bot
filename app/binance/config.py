@@ -14,6 +14,7 @@ from ..utils.storage import (
     binance_state_path,
     binance_tickets_path,
     binance_trades_path,
+    market_data_path,
     resolve_project_path,
 )
 
@@ -36,6 +37,8 @@ class Config:
     discord_webhook_url: str = os.getenv("DISCORD_WEBHOOK_URL", "")
     status_every_loops: int = int(os.getenv("STATUS_EVERY_LOOPS", "10"))
     use_rsi_filter: bool = env_bool(os.getenv("USE_RSI_FILTER"), False)
+    ema_fast_period: int = int(os.getenv("EMA_FAST_PERIOD", "9"))
+    ema_slow_period: int = int(os.getenv("EMA_SLOW_PERIOD", "21"))
     rsi_buy_min: float = float(os.getenv("RSI_BUY_MIN", "55"))
     rsi_sell_max: float = float(os.getenv("RSI_SELL_MAX", "45"))
     rsi_period: int = int(os.getenv("RSI_PERIOD", "14"))
@@ -63,13 +66,21 @@ class Config:
     slippage_buffer_pct: float = float(os.getenv("SLIPPAGE_BUFFER_PCT", "0.001"))
     selection_mode: str = os.getenv("BINANCE_SELECTION_MODE", "manual").strip().lower()
     strategy_profile: str = os.getenv("BINANCE_STRATEGY_PROFILE", "").strip().lower()
+    adaptive_mode: str = os.getenv("BINANCE_ADAPTIVE_MODE", "off").strip().lower()
     selection_csv_path: Path = field(
         default_factory=lambda: resolve_project_path(os.getenv("BINANCE_SELECTION_CSV", str(default_selection_csv_path("binance"))))
+    )
+    adaptive_report_path: Path = field(
+        default_factory=lambda: resolve_project_path(
+            os.getenv("BINANCE_ADAPTIVE_REPORT_PATH", str(market_data_path("binance_adaptive_report.txt")))
+        )
     )
     selection_rotation_loops: int = int(os.getenv("BINANCE_SELECTION_ROTATE_EVERY_LOOPS", "0"))
     selection_rotation_only_when_flat: bool = env_bool(os.getenv("BINANCE_SELECTION_ROTATE_ONLY_WHEN_FLAT"), True)
     active_strategy_profile: str = field(default="", init=False, repr=False)
     active_strategy_profile_reason: str = field(default="", init=False, repr=False)
+    active_selection_profile: str = field(default="", init=False, repr=False)
+    active_selection_profile_reason: str = field(default="", init=False, repr=False)
     state_path: Path = field(default_factory=binance_state_path)
     trades_path: Path = field(default_factory=binance_trades_path)
     tickets_path: Path = field(default_factory=binance_tickets_path)
@@ -93,6 +104,8 @@ class Config:
             raise ValueError(
                 "BINANCE_STRATEGY_PROFILE must be one of 'auto', 'manual', 'trend', 'range', 'volatile', 'slow_liquid'"
             )
+        if self.adaptive_mode not in {"off", "paper", "on"}:
+            raise ValueError("BINANCE_ADAPTIVE_MODE must be 'off', 'paper', or 'on'")
         if self.strategy_profile == "auto" and self.selection_mode == "manual":
             raise ValueError("BINANCE_STRATEGY_PROFILE=auto requires BINANCE_SELECTION_MODE=csv or scan")
         if self.selection_rotation_loops < 0:
@@ -125,6 +138,10 @@ class Config:
             raise ValueError("FEE_RATE must be >= 0")
         if self.slippage_buffer_pct < 0:
             raise ValueError("SLIPPAGE_BUFFER_PCT must be >= 0")
+        if self.ema_fast_period <= 0 or self.ema_slow_period <= 0:
+            raise ValueError("EMA_FAST_PERIOD and EMA_SLOW_PERIOD must be > 0")
+        if self.ema_fast_period >= self.ema_slow_period:
+            raise ValueError("EMA_FAST_PERIOD must be smaller than EMA_SLOW_PERIOD")
         if self.use_htf_filter:
             if self.htf_1_rsi_period <= 1 or self.htf_2_rsi_period <= 1:
                 raise ValueError("HTF RSI periods must be > 1")
@@ -147,6 +164,8 @@ class Config:
         if profile is None:
             self.active_strategy_profile = ""
             self.active_strategy_profile_reason = ""
+            self.active_selection_profile = ""
+            self.active_selection_profile_reason = ""
             return
         self.active_strategy_profile = profile.name
         self.active_strategy_profile_reason = profile.reason
@@ -155,12 +174,18 @@ class Config:
             "stop_loss_pct",
             "take_profit_pct",
             "cooldown_candles",
+            "timeframe",
+            "ema_fast_period",
+            "ema_slow_period",
+            "rsi_period",
             "use_rsi_filter",
             "rsi_buy_min",
             "rsi_sell_max",
             "use_htf_filter",
+            "htf_1_timeframe",
             "htf_1_rsi_min",
             "htf_2_enabled",
+            "htf_2_timeframe",
             "htf_2_rsi_min",
             "signal_on_closed_candle",
         ):

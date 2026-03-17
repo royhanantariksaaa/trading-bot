@@ -7,6 +7,7 @@ from pathlib import Path
 from ..selection.models import MarketMetrics
 from ..selection.profiles import StrategyProfileSelection, build_strategy_profile
 from ..selection.runtime import RuntimeSelection, load_runtime_selection, maybe_rotate_runtime_selection, scan_and_select_runtime_market
+from .adaptive import evaluate_adaptive_policy
 from .config import Config
 from .exchange import create_exchange, fetch_account_snapshot, fetch_ohlcv_df, get_market_rules, prepare_htf_rsi_filter
 from .execution import create_manual_ticket, ensure_live_stop_loss, execute_live_entry, execute_live_exit, execute_paper_entry, execute_paper_exit
@@ -114,13 +115,15 @@ def _position_state_text(state) -> str:
 
 
 def _build_strategy_label(config: Config) -> str:
-    strategy_label = "EMA 9/21"
+    strategy_label = f"EMA {config.ema_fast_period}/{config.ema_slow_period}"
     if config.use_rsi_filter:
         strategy_label += f" + RSI({config.rsi_period}) buy>={config.rsi_buy_min:.1f} sell<={config.rsi_sell_max:.1f}"
     if config.use_htf_filter:
         strategy_label += f" + HTF[{config.htf_1_timeframe}] RSI>={config.htf_1_rsi_min:.1f}"
         if config.htf_2_enabled:
             strategy_label += f" + HTF[{config.htf_2_timeframe}] RSI>={config.htf_2_rsi_min:.1f}"
+    if config.active_strategy_profile:
+        strategy_label = f"{config.active_strategy_profile} | {strategy_label}"
     return strategy_label
 
 
@@ -157,6 +160,8 @@ def _resolve_runtime_profile(config: Config, selection: RuntimeSelection) -> Str
 def _maybe_apply_selected_symbol(config: Config) -> str | None:
     if config.selection_mode == "manual":
         config.apply_strategy_profile(None)
+        config.active_selection_profile = ""
+        config.active_selection_profile_reason = ""
         if config.strategy_profile:
             return f"Selection mode manual ignores BINANCE_STRATEGY_PROFILE={config.strategy_profile}; manual symbol/settings stay untouched."
         return None
@@ -166,10 +171,34 @@ def _maybe_apply_selected_symbol(config: Config) -> str | None:
     config.symbol = selection.symbol
     profile = _resolve_runtime_profile(config, selection)
     config.apply_strategy_profile(profile)
+    config.active_selection_profile = profile.name if profile is not None else ""
+    config.active_selection_profile_reason = profile.reason if profile is not None else ""
     report_note = f" report={selection.report_path}" if selection.report_path else ""
     if profile is None:
         return f"Selection mode {config.selection_mode} picked {selection.symbol} ({selection.source}). Manual strategy settings preserved.{report_note}"
     return f"Selection mode {config.selection_mode} picked {selection.symbol} profile={profile.name} ({profile.source}) because {profile.reason}.{report_note}"
+
+
+def _adaptive_runtime_allows(config: Config) -> bool:
+    if config.adaptive_mode == "off":
+        return False
+    if config.selection_mode == "manual":
+        return False
+    if config.resolved_strategy_profile_mode != "auto":
+        return False
+    if config.adaptive_mode == "paper" and config.bot_mode != "paper":
+        return False
+    return True
+
+
+def _maybe_apply_adaptive_policy(config: Config, exchange) -> str | None:
+    if not _adaptive_runtime_allows(config):
+        return None
+    report = evaluate_adaptive_policy(config, exchange)
+    report_note = f" report={report.report_path}" if report.report_path else ""
+    if report.applied:
+        return f"Adaptive policy applied: {report.summary()}{report_note}"
+    return f"Adaptive policy fallback: {report.fallback_reason or report.regime_reason}{report_note}"
 
 
 def _can_rotate_symbol(config: Config, state) -> tuple[bool, str]:
@@ -191,6 +220,7 @@ def run_bot(config: Config) -> None:
     rotation = config.rotation_controller
     exchange = create_exchange(config)
     market_rules = get_market_rules(exchange, config.symbol)
+    adaptive_note = _maybe_apply_adaptive_policy(config, exchange)
     trades_path = config.trades_path
     notifier = DiscordNotifier(config.discord_webhook_url)
     state_path = config.state_path
@@ -229,6 +259,8 @@ def run_bot(config: Config) -> None:
     send_status(notifier, startup)
     if selection_note:
         send_status(notifier, selection_note)
+    if adaptive_note:
+        send_status(notifier, adaptive_note)
     maybe_send_daily_summary(config, notifier, state_path, tickets_path, trades_path)
 
     htf1 = None
@@ -271,21 +303,33 @@ def run_bot(config: Config) -> None:
                         mode=config.selection_mode,
                         output_path=config.selection_csv_path,
                         current_symbol=config.symbol,
-                        current_strategy_profile=config.active_strategy_profile,
+                        current_strategy_profile=config.active_selection_profile,
                         track_strategy_profile=config.resolved_strategy_profile_mode == "auto",
                     )
+                    rotation_messages: list[str] = []
                     if decision.changed and decision.selection is not None:
                         config.symbol = decision.selection.symbol
                         profile = _resolve_runtime_profile(config, decision.selection)
                         config.apply_strategy_profile(profile)
+                        config.active_selection_profile = profile.name if profile is not None else ""
                         market_rules = get_market_rules(exchange, config.symbol)
-                        if config.use_htf_filter:
-                            htf1 = prepare_htf_rsi_filter(exchange, config.symbol, config.htf_1_timeframe, config.htf_1_rsi_period, config.htf_1_rsi_min)
-                            if config.htf_2_enabled:
-                                htf2 = prepare_htf_rsi_filter(exchange, config.symbol, config.htf_2_timeframe, config.htf_2_rsi_period, config.htf_2_rsi_min)
-                        send_status(notifier, f"Selector rotation applied: {decision.reason}. report={decision.selection.report_path}")
+                        rotation_messages.append(f"Selector rotation applied: {decision.reason}. report={decision.selection.report_path}")
                     else:
                         log_event("INFO", f"Selector rotation check: {decision.reason}")
+                    adaptive_note = _maybe_apply_adaptive_policy(config, exchange)
+                    if adaptive_note:
+                        rotation_messages.append(adaptive_note)
+                    if config.use_htf_filter:
+                        htf1 = prepare_htf_rsi_filter(exchange, config.symbol, config.htf_1_timeframe, config.htf_1_rsi_period, config.htf_1_rsi_min)
+                        if config.htf_2_enabled:
+                            htf2 = prepare_htf_rsi_filter(exchange, config.symbol, config.htf_2_timeframe, config.htf_2_rsi_period, config.htf_2_rsi_min)
+                        else:
+                            htf2 = None
+                    else:
+                        htf1 = None
+                        htf2 = None
+                    for message in rotation_messages:
+                        send_status(notifier, message)
                 else:
                     log_event("INFO", reason)
                 rotation.mark_executed(loops)
@@ -301,7 +345,7 @@ def run_bot(config: Config) -> None:
                 continue
 
             df = fetch_ohlcv_df(exchange, config.symbol, config.timeframe)
-            df = add_indicators(df, rsi_period=config.rsi_period)
+            df = add_indicators(df, fast=config.ema_fast_period, slow=config.ema_slow_period, rsi_period=config.rsi_period)
 
             signal_index = len(df) - 2 if config.signal_on_closed_candle else len(df) - 1
             signal_row = df.iloc[signal_index]

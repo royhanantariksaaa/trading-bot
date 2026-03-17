@@ -11,7 +11,7 @@ from app.selection.export import build_selection_report, report_paths_from_csv_p
 from app.selection.filters import SelectionFilters
 from app.selection.models import MarketCandidate, MarketConstraints, MarketMetrics
 from app.selection.polymarket import PolymarketMarketScanner, scan_polymarket_markets
-from app.selection.profiles import build_strategy_profile
+from app.selection.profiles import StrategyProfileSelection, build_strategy_profile
 from app.selection.runtime import RotationController, load_runtime_selection, maybe_rotate_runtime_selection
 from app.selection.scoring import ScoringConfig
 from app.selection.selector import MarketSelectionConfig, select_markets
@@ -296,6 +296,39 @@ class SelectionTest(unittest.TestCase):
         config.apply_strategy_profile(profile)
         self.assertEqual(config.active_strategy_profile, "trend")
         self.assertAlmostEqual(config.risk_per_trade, profile.risk_per_trade or 0.0)
+        self.assertTrue(config.use_htf_filter)
+        self.assertTrue(config.use_rsi_filter)
+
+    def test_binance_config_applies_bounded_timeframe_and_ema_overrides(self) -> None:
+        config = BinanceConfig(selection_mode="scan", selection_rotation_loops=5)
+        profile = StrategyProfileSelection(
+            name="trend_momentum",
+            regime="trend",
+            reason="recent candles support the adaptive trend policy",
+            source="adaptive",
+            timeframe="1h",
+            ema_fast_period=12,
+            ema_slow_period=26,
+            rsi_period=13,
+            risk_per_trade=0.008,
+            stop_loss_pct=0.020,
+            take_profit_pct=0.035,
+            cooldown_candles=3,
+            use_rsi_filter=True,
+            rsi_buy_min=54.0,
+            rsi_sell_max=46.0,
+            use_htf_filter=True,
+            htf_1_timeframe="4h",
+            htf_1_rsi_min=52.0,
+            htf_2_enabled=False,
+            signal_on_closed_candle=True,
+        )
+        config.apply_strategy_profile(profile)
+        self.assertEqual(config.timeframe, "1h")
+        self.assertEqual(config.ema_fast_period, 12)
+        self.assertEqual(config.ema_slow_period, 26)
+        self.assertEqual(config.rsi_period, 13)
+        self.assertEqual(config.active_strategy_profile, "trend_momentum")
         self.assertTrue(config.use_htf_filter)
         self.assertTrue(config.use_rsi_filter)
 

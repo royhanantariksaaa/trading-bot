@@ -7,10 +7,11 @@ from pathlib import Path
 from app.binance.config import Config as BinanceConfig
 from app.polymarket.config import Config as PolymarketConfig
 from app.selection.binance import BinanceMarketScanner
-from app.selection.export import report_paths_from_csv_path, write_selection_csv, write_selection_report, write_selection_report_json
+from app.selection.export import build_selection_report, report_paths_from_csv_path, write_selection_csv, write_selection_report, write_selection_report_json
 from app.selection.filters import SelectionFilters
 from app.selection.models import MarketCandidate, MarketConstraints, MarketMetrics
 from app.selection.polymarket import PolymarketMarketScanner, scan_polymarket_markets
+from app.selection.profiles import build_strategy_profile
 from app.selection.runtime import RotationController, load_runtime_selection, maybe_rotate_runtime_selection
 from app.selection.scoring import ScoringConfig
 from app.selection.selector import MarketSelectionConfig, select_markets
@@ -29,6 +30,7 @@ def make_candidate(
     trade_count_24h: int = 5_000,
     spread_bps: float = 10.0,
     range_pct_24h: float = 4.0,
+    price_change_pct_24h: float = 2.0,
     min_notional: float = 5.0,
     min_qty: float = 0.01,
     qty_step: float = 0.01,
@@ -57,7 +59,7 @@ def make_candidate(
             volume_base_24h=volume_quote_24h / last_price,
             volume_quote_24h=volume_quote_24h,
             trade_count_24h=trade_count_24h,
-            price_change_pct_24h=2.0,
+            price_change_pct_24h=price_change_pct_24h,
             range_pct_24h=range_pct_24h,
             high_24h=last_price * 1.02,
             low_24h=last_price * 0.98,
@@ -98,6 +100,31 @@ class SelectionTest(unittest.TestCase):
         self.assertFalse(result.evaluated[1].accepted)
         self.assertFalse(result.evaluated[2].accepted)
         self.assertFalse(result.evaluated[3].accepted)
+
+    def test_selector_attaches_strategy_profile_and_report_mentions_it(self) -> None:
+        result = select_markets(
+            [
+                make_candidate(
+                    "SOL/USDT",
+                    volume_quote_24h=80_000_000.0,
+                    trade_count_24h=35_000,
+                    spread_bps=6.0,
+                    range_pct_24h=8.5,
+                    price_change_pct_24h=5.5,
+                )
+            ],
+            MarketSelectionConfig(filters=SelectionFilters(allowed_quotes=("USDT",), max_entry_notional=5.0), scoring=ScoringConfig()),
+            venue="binance",
+            scanned_at="2026-03-18T00:00:00+00:00",
+        )
+
+        self.assertIsNotNone(result.strategy_profile)
+        assert result.strategy_profile is not None
+        self.assertEqual(result.strategy_profile.name, "trend")
+        self.assertIn("profile=trend", result.summary())
+        self.assertIn("profile=trend", result.selected_report())
+        self.assertIn("Applied overrides", result.selected_report())
+        self.assertIn("Selected profile", build_selection_report(result))
 
     def test_explainable_scores_include_components_penalties_and_report(self) -> None:
         result = select_markets(
@@ -164,6 +191,9 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(selection.symbol, "SOL/USDT")
         self.assertIn("score", selection.summary)
         self.assertIn("scored", selection.explanation)
+        self.assertIsNotNone(selection.strategy_profile)
+        assert selection.strategy_profile is not None
+        self.assertIn(selection.strategy_profile.name, selection.summary)
 
     def test_rotation_decision_detects_symbol_change(self) -> None:
         result = select_markets(
@@ -187,6 +217,56 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(decision.new_symbol, "ADA/USDT")
         self.assertIsNotNone(decision.selection)
 
+    def test_rotation_decision_detects_profile_change(self) -> None:
+        result = select_markets(
+            [
+                make_candidate(
+                    "SOL/USDT",
+                    volume_quote_24h=80_000_000.0,
+                    trade_count_24h=35_000,
+                    spread_bps=6.0,
+                    range_pct_24h=8.5,
+                    price_change_pct_24h=5.5,
+                )
+            ],
+            MarketSelectionConfig(filters=SelectionFilters(allowed_quotes=("USDT",), max_entry_notional=5.0)),
+            venue="binance",
+            scanned_at="2026-03-18T00:00:00+00:00",
+        )
+        path = Path(__file__).resolve().parent / ".tmp_rotation_profile_selection.csv"
+        report_path, report_json_path = report_paths_from_csv_path(path)
+        try:
+            write_selection_csv(result, path)
+            write_selection_report(result, report_path)
+            write_selection_report_json(result, report_json_path)
+            selection = load_runtime_selection(path, venue="binance")
+            self.assertIsNotNone(selection)
+            assert selection is not None
+            self.assertIsNotNone(selection.strategy_profile)
+            assert selection.strategy_profile is not None
+            decision = maybe_rotate_runtime_selection(
+                "binance",
+                mode="csv",
+                output_path=path,
+                current_symbol="SOL/USDT",
+                current_market_id=selection.market_id,
+                current_strategy_profile=selection.strategy_profile.name,
+            )
+            decision_changed = maybe_rotate_runtime_selection(
+                "binance",
+                mode="csv",
+                output_path=path,
+                current_symbol="SOL/USDT",
+                current_market_id=selection.market_id,
+                current_strategy_profile="range",
+            )
+        finally:
+            for item in (path, report_path, report_json_path):
+                if item.exists():
+                    item.unlink()
+        self.assertFalse(decision.changed)
+        self.assertTrue(decision_changed.changed)
+
     def test_rotation_controller_schedule(self) -> None:
         controller = RotationController(enabled=True, every_loops=3, next_due_loop=3)
         self.assertFalse(controller.should_rotate(2))
@@ -199,6 +279,25 @@ class SelectionTest(unittest.TestCase):
         controller = config.rotation_controller
         self.assertTrue(controller.enabled)
         self.assertEqual(controller.every_loops, 5)
+        self.assertEqual(config.resolved_strategy_profile_mode, "auto")
+
+    def test_binance_config_applies_strategy_profile(self) -> None:
+        config = BinanceConfig(selection_mode="scan", selection_rotation_loops=5)
+        candidate = make_candidate(
+            "SOL/USDT",
+            volume_quote_24h=80_000_000.0,
+            trade_count_24h=35_000,
+            spread_bps=6.0,
+            range_pct_24h=8.5,
+            price_change_pct_24h=5.5,
+        )
+        profile = build_strategy_profile("trend", "binance", candidate.metrics)
+        assert profile is not None
+        config.apply_strategy_profile(profile)
+        self.assertEqual(config.active_strategy_profile, "trend")
+        self.assertAlmostEqual(config.risk_per_trade, profile.risk_per_trade or 0.0)
+        self.assertTrue(config.use_htf_filter)
+        self.assertTrue(config.use_rsi_filter)
 
     def test_polymarket_config_rotation_defaults(self) -> None:
         config = PolymarketConfig(token_id="abc", selection_mode="csv", selection_rotation_loops=2)

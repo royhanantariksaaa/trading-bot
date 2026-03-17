@@ -99,6 +99,16 @@ Scan Binance markets and export ranked candidates to `data/market/binance_candid
 python -m app.selection --venue binance
 ```
 
+Auto-select the Binance market and profile at startup:
+
+```bat
+set BINANCE_SELECTION_MODE=scan
+set BINANCE_STRATEGY_PROFILE=auto
+python -m app.binance
+```
+
+When `BINANCE_SELECTION_MODE` is `csv` or `scan`, the selected market is also classified into a conservative profile (`trend`, `range`, `volatile`, or `slow_liquid`) and that profile is applied before the bot starts. Use `BINANCE_STRATEGY_PROFILE=manual` to keep the base manual strategy settings, or set `BINANCE_STRATEGY_PROFILE=<profile>` to force one.
+
 Scan Polymarket YES outcomes using Gamma + live CLOB books and export ranked candidates to `data/market/polymarket_candidates.csv` plus report files:
 
 ```bat
@@ -124,7 +134,10 @@ python -m app.polymarket
 Optional runtime auto-pick modes:
 
 - `BINANCE_SELECTION_MODE=csv` -> load the first accepted row from `data/market/binance_candidates.csv`
-- `BINANCE_SELECTION_MODE=scan` -> rescan at startup, write `data/market/binance_candidates.csv`, and use the selected symbol
+- `BINANCE_SELECTION_MODE=scan` -> rescan at startup, write `data/market/binance_candidates.csv`, and use the selected symbol and profile
+- `BINANCE_STRATEGY_PROFILE=auto` -> apply the profile chosen from the selected market regime
+- `BINANCE_STRATEGY_PROFILE=manual` -> keep the existing manual strategy values even when selection mode is `csv` or `scan`
+- `BINANCE_STRATEGY_PROFILE=trend|range|volatile|slow_liquid` -> force a specific profile
 - `PM_SELECTION_MODE=csv` -> load the first accepted row from `data/market/polymarket_candidates.csv`
 - `PM_SELECTION_MODE=scan` -> rescan at startup, write `data/market/polymarket_candidates.csv`, and use the selected Polymarket token id
 
@@ -135,7 +148,7 @@ Optional conservative runtime rotation:
 - `PM_SELECTION_ROTATE_EVERY_LOOPS=<n>` -> every `n` maker loops, re-check the market while running
 - `PM_SELECTION_ROTATE_ONLY_WHEN_FLAT=true` -> only rotate when inventory is flat
 
-Manual `SYMBOL` and `POLYMARKET_TOKEN_ID` still work as before when the selection mode stays `manual`. Rotation is off by default, so existing manual flows stay untouched.
+Manual `SYMBOL` and `POLYMARKET_TOKEN_ID` still work as before when the selection mode stays `manual`. Rotation and profile auto-selection are off by default, so existing manual flows stay untouched.
 
 The `polymarket_mm/` folder is docs plus config examples for that loop. It is not a Python package.
 

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from .filters import SelectionFilters, candidate_passes, evaluate_candidate, failed_filter_reasons
 from .models import MarketCandidate, MarketScanner
+from .profiles import StrategyProfileSelection, select_strategy_profile
 from .scoring import ScoreBreakdown, ScoringConfig, score_candidate
 
 
@@ -46,6 +47,7 @@ class SelectionResult:
     evaluated: list[ScoredCandidate] = field(default_factory=list)
     ranked: list[ScoredCandidate] = field(default_factory=list)
     selected: ScoredCandidate | None = None
+    strategy_profile: StrategyProfileSelection | None = None
 
     @property
     def accepted_count(self) -> int:
@@ -57,15 +59,21 @@ class SelectionResult:
 
     def summary(self) -> str:
         best = self.selected.candidate.symbol if self.selected else "none"
+        profile = self.strategy_profile.name if self.strategy_profile else "none"
         return (
             f"venue={self.venue or 'unknown'} scanned={len(self.evaluated)} "
-            f"accepted={self.accepted_count} rejected={self.rejected_count} selected={best}"
+            f"accepted={self.accepted_count} rejected={self.rejected_count} selected={best} profile={profile}"
         )
 
     def selected_report(self) -> str:
         if self.selected is None:
             return f"No market selected for venue={self.venue or 'unknown'} after evaluating {len(self.evaluated)} candidates."
-        return "\n".join(self.selected.why_lines())
+        lines: list[str] = []
+        if self.strategy_profile is not None:
+            lines.extend(self.strategy_profile.why_lines())
+            lines.append("")
+        lines.extend(self.selected.why_lines())
+        return "\n".join(lines)
 
 
 class MarketSelector:
@@ -113,12 +121,14 @@ def select_markets(
     selected = ranked[0] if ranked else None
     result_scanned_at = scanned_at or (evaluated[0].candidate.scanned_at if evaluated else utc_now_iso())
     result_venue = venue or (evaluated[0].candidate.venue if evaluated else "")
+    strategy_profile = select_strategy_profile(result_venue or (selected.candidate.venue if selected else ""), selected.candidate.metrics) if selected is not None else None
     return SelectionResult(
         scanned_at=result_scanned_at,
         venue=result_venue,
         evaluated=evaluated,
         ranked=ranked,
         selected=selected,
+        strategy_profile=strategy_profile,
     )
 
 

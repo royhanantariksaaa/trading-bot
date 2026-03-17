@@ -4,7 +4,9 @@ import csv
 import time
 from pathlib import Path
 
-from ..selection.runtime import load_runtime_selection, maybe_rotate_runtime_selection, scan_and_select_runtime_market
+from ..selection.models import MarketMetrics
+from ..selection.profiles import StrategyProfileSelection, build_strategy_profile
+from ..selection.runtime import RuntimeSelection, load_runtime_selection, maybe_rotate_runtime_selection, scan_and_select_runtime_market
 from .config import Config
 from .exchange import create_exchange, fetch_account_snapshot, fetch_ohlcv_df, get_market_rules, prepare_htf_rsi_filter
 from .execution import create_manual_ticket, ensure_live_stop_loss, execute_live_entry, execute_live_exit, execute_paper_entry, execute_paper_exit
@@ -142,15 +144,32 @@ def _resolve_exit_reason(config: Config, state, signal: str, signal_price: float
     return ""
 
 
+def _resolve_runtime_profile(config: Config, selection: RuntimeSelection) -> StrategyProfileSelection | None:
+    mode = config.resolved_strategy_profile_mode
+    if mode == "manual":
+        return None
+    if mode == "auto":
+        return selection.strategy_profile
+    metrics = selection.metrics or MarketMetrics()
+    return build_strategy_profile(mode, selection.venue, metrics, source="override")
+
+
 def _maybe_apply_selected_symbol(config: Config) -> str | None:
     if config.selection_mode == "manual":
+        config.apply_strategy_profile(None)
+        if config.strategy_profile:
+            return f"Selection mode manual ignores BINANCE_STRATEGY_PROFILE={config.strategy_profile}; manual symbol/settings stay untouched."
         return None
     selection = load_runtime_selection(config.selection_csv_path, venue="binance") if config.selection_mode == "csv" else scan_and_select_runtime_market("binance", output_path=config.selection_csv_path)
     if selection is None or not selection.symbol:
         raise ValueError(f"No Binance market selection available via mode={config.selection_mode}")
     config.symbol = selection.symbol
+    profile = _resolve_runtime_profile(config, selection)
+    config.apply_strategy_profile(profile)
     report_note = f" report={selection.report_path}" if selection.report_path else ""
-    return f"Selection mode {config.selection_mode} picked {selection.symbol} ({selection.source}).{report_note}"
+    if profile is None:
+        return f"Selection mode {config.selection_mode} picked {selection.symbol} ({selection.source}). Manual strategy settings preserved.{report_note}"
+    return f"Selection mode {config.selection_mode} picked {selection.symbol} profile={profile.name} ({profile.source}) because {profile.reason}.{report_note}"
 
 
 def _can_rotate_symbol(config: Config, state) -> tuple[bool, str]:
@@ -252,9 +271,13 @@ def run_bot(config: Config) -> None:
                         mode=config.selection_mode,
                         output_path=config.selection_csv_path,
                         current_symbol=config.symbol,
+                        current_strategy_profile=config.active_strategy_profile,
+                        track_strategy_profile=config.resolved_strategy_profile_mode == "auto",
                     )
                     if decision.changed and decision.selection is not None:
                         config.symbol = decision.selection.symbol
+                        profile = _resolve_runtime_profile(config, decision.selection)
+                        config.apply_strategy_profile(profile)
                         market_rules = get_market_rules(exchange, config.symbol)
                         if config.use_htf_filter:
                             htf1 = prepare_htf_rsi_filter(exchange, config.symbol, config.htf_1_timeframe, config.htf_1_rsi_period, config.htf_1_rsi_min)

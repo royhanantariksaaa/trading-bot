@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..common.env import env_bool
+from ..selection.profiles import PROFILE_NAMES, StrategyProfileSelection
 from ..selection.runtime import RotationController, default_selection_csv_path
 from ..utils.storage import (
     binance_backtest_output_path,
@@ -61,11 +62,14 @@ class Config:
     fee_rate: float = float(os.getenv("FEE_RATE", "0.001"))
     slippage_buffer_pct: float = float(os.getenv("SLIPPAGE_BUFFER_PCT", "0.001"))
     selection_mode: str = os.getenv("BINANCE_SELECTION_MODE", "manual").strip().lower()
+    strategy_profile: str = os.getenv("BINANCE_STRATEGY_PROFILE", "").strip().lower()
     selection_csv_path: Path = field(
         default_factory=lambda: resolve_project_path(os.getenv("BINANCE_SELECTION_CSV", str(default_selection_csv_path("binance"))))
     )
     selection_rotation_loops: int = int(os.getenv("BINANCE_SELECTION_ROTATE_EVERY_LOOPS", "0"))
     selection_rotation_only_when_flat: bool = env_bool(os.getenv("BINANCE_SELECTION_ROTATE_ONLY_WHEN_FLAT"), True)
+    active_strategy_profile: str = field(default="", init=False, repr=False)
+    active_strategy_profile_reason: str = field(default="", init=False, repr=False)
     state_path: Path = field(default_factory=binance_state_path)
     trades_path: Path = field(default_factory=binance_trades_path)
     tickets_path: Path = field(default_factory=binance_tickets_path)
@@ -84,6 +88,13 @@ class Config:
             raise ValueError("ENTRY_SIZE_MODE must be 'quote_budget' or 'quantity'")
         if self.selection_mode not in {"manual", "csv", "scan"}:
             raise ValueError("BINANCE_SELECTION_MODE must be 'manual', 'csv', or 'scan'")
+        allowed_profiles = {"", "auto", "manual", *PROFILE_NAMES}
+        if self.strategy_profile not in allowed_profiles:
+            raise ValueError(
+                "BINANCE_STRATEGY_PROFILE must be one of 'auto', 'manual', 'trend', 'range', 'volatile', 'slow_liquid'"
+            )
+        if self.strategy_profile == "auto" and self.selection_mode == "manual":
+            raise ValueError("BINANCE_STRATEGY_PROFILE=auto requires BINANCE_SELECTION_MODE=csv or scan")
         if self.selection_rotation_loops < 0:
             raise ValueError("BINANCE_SELECTION_ROTATE_EVERY_LOOPS must be >= 0")
         if self.bot_mode == "live" and not self.enable_live_trading:
@@ -125,6 +136,37 @@ class Config:
         if self.binance_api_base_url:
             return self.binance_api_base_url
         return None
+
+    @property
+    def resolved_strategy_profile_mode(self) -> str:
+        if self.strategy_profile:
+            return self.strategy_profile
+        return "auto" if self.selection_mode in {"csv", "scan"} else "manual"
+
+    def apply_strategy_profile(self, profile: StrategyProfileSelection | None) -> None:
+        if profile is None:
+            self.active_strategy_profile = ""
+            self.active_strategy_profile_reason = ""
+            return
+        self.active_strategy_profile = profile.name
+        self.active_strategy_profile_reason = profile.reason
+        for field_name in (
+            "risk_per_trade",
+            "stop_loss_pct",
+            "take_profit_pct",
+            "cooldown_candles",
+            "use_rsi_filter",
+            "rsi_buy_min",
+            "rsi_sell_max",
+            "use_htf_filter",
+            "htf_1_rsi_min",
+            "htf_2_enabled",
+            "htf_2_rsi_min",
+            "signal_on_closed_candle",
+        ):
+            value = getattr(profile, field_name)
+            if value is not None:
+                setattr(self, field_name, value)
 
     @property
     def rotation_controller(self) -> RotationController:

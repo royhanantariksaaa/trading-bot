@@ -22,6 +22,7 @@ Use this as the final pre-live checklist for the refactored bot.
 - [ ] fills update position and pnl automatically
 - [ ] startup reconciliation exists
 - [ ] restart does not lose position or pending orders
+- [ ] any Binance selection-mode run has the intended strategy profile mode documented (`auto`, `manual`, or forced profile)
 
 ---
 

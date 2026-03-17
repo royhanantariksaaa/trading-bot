@@ -4,6 +4,7 @@ import csv
 import json
 from pathlib import Path
 
+from .profiles import StrategyProfileSelection
 from .selector import ScoredCandidate, SelectionResult
 
 
@@ -31,6 +32,11 @@ CSV_COLUMNS = [
     "score_penalties",
     "score_explanation",
     "filter_failures",
+    "strategy_profile_name",
+    "strategy_profile_regime",
+    "strategy_profile_source",
+    "strategy_profile_reason",
+    "strategy_profile",
     "last_price",
     "bid",
     "ask",
@@ -63,7 +69,25 @@ def _format_value(value) -> str:
     return str(value)
 
 
-def candidate_to_row(item: ScoredCandidate) -> dict[str, str]:
+def _profile_row(profile: StrategyProfileSelection | None, *, selected: bool) -> dict[str, str]:
+    if not selected or profile is None:
+        return {
+            "strategy_profile_name": "",
+            "strategy_profile_regime": "",
+            "strategy_profile_source": "",
+            "strategy_profile_reason": "",
+            "strategy_profile": "",
+        }
+    return {
+        "strategy_profile_name": profile.name,
+        "strategy_profile_regime": profile.regime,
+        "strategy_profile_source": profile.source,
+        "strategy_profile_reason": profile.reason,
+        "strategy_profile": profile.to_json(),
+    }
+
+
+def candidate_to_row(item: ScoredCandidate, *, profile: StrategyProfileSelection | None = None, selected: bool = False) -> dict[str, str]:
     candidate = item.candidate
     metrics = candidate.metrics
     constraints = candidate.constraints
@@ -92,6 +116,7 @@ def candidate_to_row(item: ScoredCandidate) -> dict[str, str]:
         "score_penalties": _format_value(item.score_breakdown.penalties),
         "score_explanation": " | ".join(item.score_breakdown.explanation),
         "filter_failures": " | ".join(failures),
+        **_profile_row(profile, selected=selected),
         "last_price": _format_value(metrics.last_price),
         "bid": _format_value(metrics.bid),
         "ask": _format_value(metrics.ask),
@@ -140,6 +165,7 @@ def _report_payload(result: SelectionResult) -> dict:
             "components": [component_to_dict(component) for component in item.score_breakdown.components],
             "penalties": [penalty_to_dict(penalty) for penalty in item.score_breakdown.penalty_items],
             "filter_failures": [f"{decision.name}:{decision.reason}" for decision in item.filter_decisions if not decision.passed],
+            "strategy_profile": result.strategy_profile.to_dict() if result.strategy_profile is not None else None,
         }
 
     return {
@@ -147,6 +173,7 @@ def _report_payload(result: SelectionResult) -> dict:
         "venue": result.venue,
         "summary": result.summary(),
         "selected": selected,
+        "strategy_profile": result.strategy_profile.to_dict() if result.strategy_profile is not None else None,
         "ranked_symbols": [item.candidate.symbol for item in result.ranked],
     }
 
@@ -166,7 +193,7 @@ def write_selection_csv(result: SelectionResult, path: Path) -> Path:
         writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
         writer.writeheader()
         for item in ordered:
-            writer.writerow(candidate_to_row(item))
+            writer.writerow(candidate_to_row(item, profile=result.strategy_profile, selected=item is result.selected))
     return path
 
 
@@ -181,6 +208,10 @@ def build_selection_report(result: SelectionResult, *, top: int = 5) -> str:
         result.summary(),
         "",
     ]
+    if result.strategy_profile is not None:
+        lines.append("Selected profile")
+        lines.extend(f"- {line}" for line in result.strategy_profile.why_lines())
+        lines.append("")
     if result.selected is None:
         lines.append("No candidate passed the filters.")
     else:

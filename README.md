@@ -1,26 +1,37 @@
 # Trading Bot
 
-Multi-venue repo with an app-centric Python layout and runtime artifacts under `data/`.
+Multi-venue repo with one importable application package, `app`, and runtime artifacts under `data/`.
 
 ## Structure
 
 ```text
 trading-bot/
   app/
+    __main__.py      # `python -m app` -> Binance default entrypoint
     main.py
     binance/
+      __main__.py    # `python -m app.binance`
+      main.py
+      backtest.py
+      ...
     polymarket/
+      __main__.py    # `python -m app.polymarket`
+      main.py
+      ...
     common/
     utils/
+  polymarket_mm/
+    README.md        # docs and env example for the Polymarket MVP
   data/
     market/
     logs/
     backtests/
     state/
   tests/
+  docs/
 ```
 
-`app` is the primary package now. `trading_bot` remains as a thin compatibility alias so legacy imports and `python -m trading_bot...` commands still resolve.
+Use `app.*` for imports and module commands. The old compatibility shim package has been removed.
 
 ## Install
 
@@ -30,7 +41,7 @@ python -m pip install -r requirements.txt
 
 ## Configure
 
-Copy `.env.example` to `.env` and edit only the values you need. The repo now uses a single root env file for both venues.
+Copy `.env.example` to `.env` and edit only the values you need. The repo uses a single root env file for both venues.
 
 ```bat
 copy .env.example .env
@@ -67,7 +78,7 @@ Explicit Binance package entrypoint:
 python -m app.binance
 ```
 
-Helpers:
+Useful Binance helpers:
 
 ```bat
 python -m app.binance.backtest --symbol SOL/USDT --timeframe 15m --candles 1000 --use-rsi-filter --rsi-buy-min 52 --rsi-sell-max 48
@@ -78,13 +89,6 @@ python -m app.binance.review_day
 python -m app.binance.test_webhook
 ```
 
-Legacy commands still work:
-
-```bat
-python -m trading_bot
-python -m trading_bot.binance
-```
-
 ## Run Polymarket
 
 Set the `POLYMARKET_*` and `PM_*` values in the same root `.env`, then run:
@@ -93,13 +97,9 @@ Set the `POLYMARKET_*` and `PM_*` values in the same root `.env`, then run:
 python -m app.polymarket
 ```
 
-Legacy compatibility:
+The `polymarket_mm/` folder is docs plus config examples for that loop. It is not a Python package.
 
-```bat
-python -m trading_bot.polymarket
-```
-
-## Runtime model
+## Runtime Model
 
 The Binance runtime is position/order driven instead of ticket driven:
 
@@ -110,9 +110,9 @@ The Binance runtime is position/order driven instead of ticket driven:
 - live startup reconciliation reloads balances, open orders, and recent trades
 - live entries arm a protective stop-loss order after the entry fill
 
-## Runtime files
+## Runtime Files
 
-Defaults now live under `data/`:
+Defaults live under `data/`:
 
 - `data/state/runtime_state.json`: Binance runtime position/order state
 - `data/logs/trades.csv`: Binance paper trade log
@@ -130,9 +130,8 @@ All of those paths can be overridden with env vars such as `BINANCE_STATE_PATH`,
 
 - `app/common` is limited to actual shared plumbing.
 - `app/utils/storage.py` centralizes repo-relative runtime paths.
-- `polymarket_mm/` remains only as a small compatibility/docs folder.
 
-## Important limits
+## Important Limits
 
 Still not a finished production platform:
 

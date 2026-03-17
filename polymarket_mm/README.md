@@ -35,8 +35,6 @@ copy .env.example .env
 python -m app.polymarket
 ```
 
-Legacy `python -m trading_bot.polymarket` still works through a compatibility alias.
-
 ## Config knobs
 
 - `PM_QUOTE_SIZE`: quote size in shares

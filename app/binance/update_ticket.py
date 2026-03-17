@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
+from .config import Config
 from .state import clear_pending_ticket, load_state, save_state
 from .tickets import VALID_TICKET_STATUSES, append_decision_log, update_ticket_status
 
@@ -14,9 +14,10 @@ def main() -> None:
     parser.add_argument("--note", default="", help="Optional note")
     args = parser.parse_args()
 
-    tickets_path = Path("manual_tickets.csv")
-    decision_log_path = Path("decision_log.csv")
-    state_path = Path("runtime_state.json")
+    config = Config()
+    tickets_path = config.tickets_path
+    decision_log_path = config.decision_log_path
+    state_path = config.state_path
 
     updated = update_ticket_status(tickets_path, args.ticket, args.status)
     if not updated:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from uuid import uuid4
 
 from .config import Config
@@ -321,7 +320,7 @@ def apply_manual_execution(
     order_id: str = "",
     client_order_id: str = "",
 ) -> tuple[float, ExecutionRecord]:
-    ticket = get_ticket(Path("manual_tickets.csv"), ticket_id)
+    ticket = get_ticket(config.tickets_path, ticket_id)
     stop_loss = float(ticket.get("stop_loss") or 0) if ticket else price * (1 - config.stop_loss_pct)
     take_profit = float(ticket.get("take_profit") or 0) if ticket else price * (1 + config.take_profit_pct)
 
@@ -354,7 +353,7 @@ def apply_manual_execution(
         target_status = "closed"
 
     clear_pending_ticket(state)
-    update_ticket_status(Path("manual_tickets.csv"), ticket_id, target_status)
+    update_ticket_status(config.tickets_path, ticket_id, target_status)
     record = ExecutionRecord(
         timestamp=now_iso(),
         ticket_id=ticket_id,
@@ -370,5 +369,5 @@ def apply_manual_execution(
         fill_source="manual",
         notes=note,
     )
-    append_execution_log(Path("live_execution_log.csv"), record)
+    append_execution_log(config.execution_log_path, record)
     return realized, record

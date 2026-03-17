@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from trading_bot.common.env import env_bool
+from ..common.env import env_bool
+from ..utils.storage import polymarket_log_path, polymarket_state_path
 
 
 @dataclass
@@ -22,8 +23,8 @@ class Config:
     poll_seconds: int = int(os.getenv("PM_POLL_SECONDS", "5"))
     loops: int = int(os.getenv("PM_LOOPS", "0"))
     paper_mode: bool = env_bool(os.getenv("PM_PAPER_MODE"), True)
-    state_path: Path = Path(os.getenv("PM_STATE_PATH", "polymarket_mm/state.json"))
-    log_path: Path = Path(os.getenv("PM_LOG_PATH", "polymarket_mm/runs.csv"))
+    state_path: Path = field(default_factory=polymarket_state_path)
+    log_path: Path = field(default_factory=polymarket_log_path)
 
     def validate(self) -> None:
         if not self.token_id:

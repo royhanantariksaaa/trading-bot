@@ -144,11 +144,11 @@ def _resolve_exit_reason(config: Config, state, signal: str, signal_price: float
 def run_bot(config: Config) -> None:
     exchange = create_exchange(config)
     market_rules = get_market_rules(exchange, config.symbol)
-    trades_path = Path("trades.csv")
+    trades_path = config.trades_path
     notifier = DiscordNotifier(config.discord_webhook_url)
-    state_path = Path("runtime_state.json")
-    tickets_path = Path("manual_tickets.csv")
-    decision_log_path = Path("decision_log.csv")
+    state_path = config.state_path
+    tickets_path = config.tickets_path
+    decision_log_path = config.decision_log_path
 
     state = load_state(state_path)
     if state.paper_balance_usdt <= 0:

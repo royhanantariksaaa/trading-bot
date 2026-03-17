@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 from .config import Config
 from .formatters import format_no_trade_message, format_startup_message, format_status_message
@@ -11,7 +10,11 @@ from .tickets import ManualTicket, append_ticket, build_daily_summary, build_tic
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Preview formatted bot messages.")
-    parser.add_argument("--persist-tickets", action="store_true", help="Also write preview tickets into manual_tickets.csv")
+    parser.add_argument(
+        "--persist-tickets",
+        action="store_true",
+        help="Also write preview tickets into the configured Binance tickets CSV.",
+    )
     args = parser.parse_args()
 
     config = Config()
@@ -117,9 +120,9 @@ def main() -> None:
     print(summary, flush=True)
 
     if args.persist_tickets:
-        append_ticket(Path("manual_tickets.csv"), buy_ticket)
-        append_ticket(Path("manual_tickets.csv"), sell_ticket)
-        print("Preview tickets persisted to manual_tickets.csv", flush=True)
+        append_ticket(config.tickets_path, buy_ticket)
+        append_ticket(config.tickets_path, sell_ticket)
+        print(f"Preview tickets persisted to {config.tickets_path}", flush=True)
 
     if notifier.enabled:
         notifier.send(startup)

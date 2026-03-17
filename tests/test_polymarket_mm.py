@@ -1,6 +1,6 @@
-from trading_bot.polymarket.config import Config
-from trading_bot.polymarket.maker import apply_fill, compute_quote_plan, mark_to_market
-from trading_bot.polymarket.models import BookSnapshot, BotState, FillResult, QuoteLevel
+from app.polymarket.config import Config
+from app.polymarket.maker import apply_fill, compute_quote_plan, mark_to_market
+from app.polymarket.models import BookSnapshot, BotState, FillResult, QuoteLevel
 
 
 def sample_book() -> BookSnapshot:

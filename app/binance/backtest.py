@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
+from ..utils.storage import resolve_project_path
 from .config import Config
 from .exchange import create_exchange, fetch_ohlcv_df, prepare_htf_rsi_filter
 from .logger import fmt_pct, log_event
@@ -33,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--htf-2-timeframe", type=str, help="Second HTF timeframe, e.g. 4h or 1d")
     parser.add_argument("--htf-2-rsi-min", type=float, help="Minimum RSI for HTF layer 2")
     parser.add_argument("--htf-2-rsi-period", type=int, help="RSI period for HTF layer 2")
-    parser.add_argument("--output", default="backtest_trades.csv", help="Trade log CSV output path")
+    parser.add_argument("--output", help="Trade log CSV output path")
     return parser.parse_args()
 
 
@@ -82,6 +82,7 @@ def main() -> None:
         config.htf_2_rsi_period = args.htf_2_rsi_period
 
     config.validate()
+    output_path = resolve_project_path(args.output) if args.output else config.backtest_output_path
 
     exchange = create_exchange(config)
     df = fetch_ohlcv_df(exchange, config.symbol, config.timeframe, limit=args.candles)
@@ -101,7 +102,7 @@ def main() -> None:
 
     wallet = PaperWallet(
         balance_usdt=config.starting_balance,
-        trades_path=Path(args.output),
+        trades_path=output_path,
         fee_rate=config.fee_rate,
         slippage_pct=config.slippage_buffer_pct,
     )
@@ -209,7 +210,7 @@ def main() -> None:
     print(f"Realized PnL: {realized_pnl:.4f} USDT")
     print(f"Return: {total_return_pct * 100:.2f}%")
     print(f"Max drawdown: {max_drawdown_pct * 100:.2f}%")
-    print(f"Trade log: {args.output}")
+    print(f"Trade log: {output_path}")
 
 
 if __name__ == "__main__":

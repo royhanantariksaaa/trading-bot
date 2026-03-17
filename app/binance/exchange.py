@@ -93,7 +93,7 @@ def prepare_htf_rsi_filter(
     limit: int = 300,
 ) -> pd.DataFrame:
     df = fetch_ohlcv_df(exchange, symbol, timeframe, limit=limit)
-    from strategy import add_indicators
+    from .strategy import add_indicators
 
     df = add_indicators(df, rsi_period=rsi_period)
     result = df[["timestamp", "rsi"]].copy()

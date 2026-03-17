@@ -1,2 +1,0 @@
-timestamp,ticket_id,action,symbol,execution_type,price,qty,notional_usd,fee_usd,notes
-2026-03-17T15:38:26,preview01,BUY,SOL/USDT,entry,94.3,0.053,4.9979,0.01,preview manual fill

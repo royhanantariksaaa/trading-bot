@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import csv
 from collections import Counter
-from pathlib import Path
 from datetime import datetime, timezone
+
+from .config import Config
 
 
 def today_str() -> str:
@@ -23,9 +24,10 @@ def count_csv_rows_today(path: Path, timestamp_field: str) -> list[dict]:
 
 
 def main() -> None:
-    tickets = count_csv_rows_today(Path("manual_tickets.csv"), "created_at")
-    decisions = count_csv_rows_today(Path("decision_log.csv"), "timestamp")
-    executions = count_csv_rows_today(Path("live_execution_log.csv"), "timestamp")
+    config = Config()
+    tickets = count_csv_rows_today(config.tickets_path, "created_at")
+    decisions = count_csv_rows_today(config.decision_log_path, "timestamp")
+    executions = count_csv_rows_today(config.execution_log_path, "timestamp")
 
     ticket_status_counts = Counter(row.get("status", "unknown") for row in tickets)
     decision_counts = Counter(row.get("decision", "unknown") for row in decisions)

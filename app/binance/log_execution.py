@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 from .config import Config
 from .execution import apply_manual_execution
@@ -23,7 +22,7 @@ def main() -> None:
     args = parser.parse_args()
 
     config = Config()
-    state_path = Path("runtime_state.json")
+    state_path = config.state_path
     state = load_state(state_path)
     realized, _record = apply_manual_execution(
         state=state,

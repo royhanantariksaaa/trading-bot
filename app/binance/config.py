@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 
-from trading_bot.common.env import env_bool
+from ..common.env import env_bool
+from ..utils.storage import (
+    binance_backtest_output_path,
+    binance_decision_log_path,
+    binance_execution_log_path,
+    binance_state_path,
+    binance_tickets_path,
+    binance_trades_path,
+)
 
 
 @dataclass
@@ -49,6 +58,12 @@ class Config:
     binance_api_base_url: str = os.getenv("BINANCE_API_BASE_URL", "").strip()
     fee_rate: float = float(os.getenv("FEE_RATE", "0.001"))
     slippage_buffer_pct: float = float(os.getenv("SLIPPAGE_BUFFER_PCT", "0.001"))
+    state_path: Path = field(default_factory=binance_state_path)
+    trades_path: Path = field(default_factory=binance_trades_path)
+    tickets_path: Path = field(default_factory=binance_tickets_path)
+    decision_log_path: Path = field(default_factory=binance_decision_log_path)
+    execution_log_path: Path = field(default_factory=binance_execution_log_path)
+    backtest_output_path: Path = field(default_factory=binance_backtest_output_path)
 
     def validate(self) -> None:
         if self.bot_mode not in {"paper", "live"}:

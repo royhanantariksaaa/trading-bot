@@ -2,7 +2,7 @@
 
 Paper-first MVP for a **single Polymarket outcome token**.
 
-This folder is no longer a Python package. It just holds env/docs/default runtime files for the real implementation in `trading_bot.polymarket`.
+This folder is no longer a Python package. It just holds compatibility docs and env examples for the real implementation in `app.polymarket`.
 
 What it does:
 - reads the public CLOB orderbook from `https://clob.polymarket.com/book`
@@ -21,10 +21,10 @@ What it does **not** do yet:
 
 ## Quick start
 
-1. Copy env file:
+1. Copy the root env example:
 
 ```bat
-copy polymarket_mm\.env.example polymarket_mm\.env
+copy .env.example .env
 ```
 
 2. Set `POLYMARKET_TOKEN_ID`
@@ -32,8 +32,10 @@ copy polymarket_mm\.env.example polymarket_mm\.env
 3. Run:
 
 ```bat
-python -m trading_bot.polymarket
+python -m app.polymarket
 ```
+
+Legacy `python -m trading_bot.polymarket` still works through a compatibility alias.
 
 ## Config knobs
 

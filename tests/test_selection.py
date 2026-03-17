@@ -8,6 +8,8 @@ from app.selection.binance import BinanceMarketScanner
 from app.selection.export import write_selection_csv
 from app.selection.filters import SelectionFilters
 from app.selection.models import MarketCandidate, MarketConstraints, MarketMetrics
+from app.selection.polymarket import PolymarketMarketScanner, scan_polymarket_markets
+from app.selection.runtime import load_runtime_selection
 from app.selection.scoring import ScoringConfig
 from app.selection.selector import MarketSelectionConfig, select_markets
 
@@ -173,6 +175,94 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(candidate.constraints.qty_step, 0.01)
         self.assertAlmostEqual(candidate.metrics.spread_bps or 0.0, 20.0, places=6)
         self.assertEqual(candidate.metrics.trade_count_24h, 321)
+
+    def test_polymarket_scanner_normalizes_yes_outcome(self) -> None:
+        class FakePolymarketClient:
+            def list_markets(self, **kwargs):
+                return [
+                    {
+                        "id": "123",
+                        "slug": "fed-cuts-rates",
+                        "question": "Fed cuts rates?",
+                        "active": True,
+                        "closed": False,
+                        "acceptingOrders": True,
+                        "enableOrderBook": True,
+                        "clobTokenIds": '["yes-token", "no-token"]',
+                        "outcomes": '["Yes", "No"]',
+                        "outcomePrices": '["0.43", "0.57"]',
+                        "volume24hrClob": 25000,
+                        "oneDayPriceChange": 0.07,
+                        "commentCount": 42,
+                    }
+                ]
+
+            def get_book(self, token_id: str):
+                self.last_book_token = token_id
+                return {
+                    "asset_id": token_id,
+                    "bids": [{"price": "0.42", "size": "100"}],
+                    "asks": [{"price": "0.44", "size": "120"}],
+                    "min_order_size": "5",
+                    "tick_size": "0.01",
+                }
+
+        scanner = PolymarketMarketScanner(client=FakePolymarketClient(), allowed_quotes=("USDC",), outcome_mode="yes")
+        candidates = scanner.scan()
+
+        self.assertEqual(len(candidates), 1)
+        candidate = candidates[0]
+        self.assertEqual(candidate.market_id, "yes-token")
+        self.assertEqual(candidate.symbol, "fed-cuts-rates:YES")
+        self.assertEqual(candidate.quote_asset, "USDC")
+        self.assertEqual(candidate.market_type, "binary")
+        self.assertAlmostEqual(candidate.metrics.last_price or 0.0, 0.43, places=6)
+        self.assertAlmostEqual(candidate.metrics.spread_bps or 0.0, ((0.44 - 0.42) / 0.43) * 10000, places=4)
+
+    def test_polymarket_scan_and_csv_runtime_selection(self) -> None:
+        class FakePolymarketClient:
+            def list_markets(self, **kwargs):
+                return [
+                    {
+                        "id": "123",
+                        "slug": "fed-cuts-rates",
+                        "question": "Fed cuts rates?",
+                        "active": True,
+                        "closed": False,
+                        "acceptingOrders": True,
+                        "enableOrderBook": True,
+                        "clobTokenIds": '["yes-token", "no-token"]',
+                        "outcomes": '["Yes", "No"]',
+                        "outcomePrices": '["0.43", "0.57"]',
+                        "volume24hrClob": 25000,
+                        "oneDayPriceChange": 0.07,
+                        "commentCount": 42,
+                    }
+                ]
+
+            def get_book(self, token_id: str):
+                return {
+                    "asset_id": token_id,
+                    "bids": [{"price": "0.42", "size": "100"}],
+                    "asks": [{"price": "0.44", "size": "120"}],
+                    "min_order_size": "5",
+                    "tick_size": "0.01",
+                }
+
+        result = scan_polymarket_markets(client=FakePolymarketClient(), limit=5, book_limit=5)
+        self.assertIsNotNone(result.selected)
+        path = Path(__file__).resolve().parent / ".tmp_polymarket_candidates.csv"
+        try:
+            write_selection_csv(result, path)
+            selection = load_runtime_selection(path, venue="polymarket")
+        finally:
+            if path.exists():
+                path.unlink()
+
+        self.assertIsNotNone(selection)
+        assert selection is not None
+        self.assertEqual(selection.market_id, "yes-token")
+        self.assertEqual(selection.symbol, "fed-cuts-rates:YES")
 
 
 if __name__ == "__main__":

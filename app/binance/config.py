@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..common.env import env_bool
+from ..selection.runtime import default_selection_csv_path
 from ..utils.storage import (
     binance_backtest_output_path,
     binance_decision_log_path,
@@ -12,6 +13,7 @@ from ..utils.storage import (
     binance_state_path,
     binance_tickets_path,
     binance_trades_path,
+    resolve_project_path,
 )
 
 
@@ -58,6 +60,10 @@ class Config:
     binance_api_base_url: str = os.getenv("BINANCE_API_BASE_URL", "").strip()
     fee_rate: float = float(os.getenv("FEE_RATE", "0.001"))
     slippage_buffer_pct: float = float(os.getenv("SLIPPAGE_BUFFER_PCT", "0.001"))
+    selection_mode: str = os.getenv("BINANCE_SELECTION_MODE", "manual").strip().lower()
+    selection_csv_path: Path = field(
+        default_factory=lambda: resolve_project_path(os.getenv("BINANCE_SELECTION_CSV", str(default_selection_csv_path("binance"))))
+    )
     state_path: Path = field(default_factory=binance_state_path)
     trades_path: Path = field(default_factory=binance_trades_path)
     tickets_path: Path = field(default_factory=binance_tickets_path)
@@ -74,6 +80,8 @@ class Config:
             raise ValueError("APPROVAL_MODE must be 'none', 'discord', or 'terminal'")
         if self.entry_size_mode not in {"quote_budget", "quantity"}:
             raise ValueError("ENTRY_SIZE_MODE must be 'quote_budget' or 'quantity'")
+        if self.selection_mode not in {"manual", "csv", "scan"}:
+            raise ValueError("BINANCE_SELECTION_MODE must be 'manual', 'csv', or 'scan'")
         if self.bot_mode == "live" and not self.enable_live_trading:
             raise ValueError("Live mode requires ENABLE_LIVE_TRADING=true")
         if self.bot_mode == "live" and (not self.api_key or not self.api_secret):

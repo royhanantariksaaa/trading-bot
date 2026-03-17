@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..common.env import env_bool
-from ..utils.storage import polymarket_log_path, polymarket_state_path
+from ..selection.runtime import default_selection_csv_path
+from ..utils.storage import polymarket_log_path, polymarket_state_path, resolve_project_path
 
 
 @dataclass
@@ -23,12 +24,18 @@ class Config:
     poll_seconds: int = int(os.getenv("PM_POLL_SECONDS", "5"))
     loops: int = int(os.getenv("PM_LOOPS", "0"))
     paper_mode: bool = env_bool(os.getenv("PM_PAPER_MODE"), True)
+    selection_mode: str = os.getenv("PM_SELECTION_MODE", "manual").strip().lower()
+    selection_csv_path: Path = field(
+        default_factory=lambda: resolve_project_path(os.getenv("PM_SELECTION_CSV", str(default_selection_csv_path("polymarket"))))
+    )
     state_path: Path = field(default_factory=polymarket_state_path)
     log_path: Path = field(default_factory=polymarket_log_path)
 
     def validate(self) -> None:
         if not self.token_id:
             raise ValueError("POLYMARKET_TOKEN_ID is required")
+        if self.selection_mode not in {"manual", "csv", "scan"}:
+            raise ValueError("PM_SELECTION_MODE must be 'manual', 'csv', or 'scan'")
         if self.quote_size <= 0:
             raise ValueError("PM_QUOTE_SIZE must be > 0")
         if self.base_spread <= 0 or self.base_spread >= 1:

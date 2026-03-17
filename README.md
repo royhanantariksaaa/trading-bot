@@ -96,7 +96,13 @@ python -m app.binance.test_webhook
 Scan Binance markets and export ranked candidates to `data/market/binance_candidates.csv`:
 
 ```bat
-python -m app.selection
+python -m app.selection --venue binance
+```
+
+Scan Polymarket YES outcomes using Gamma + live CLOB books and export ranked candidates to `data/market/polymarket_candidates.csv`:
+
+```bat
+python -m app.selection --venue polymarket --allowed-quotes USDC --min-quote-volume 5000 --min-trade-count 0 --max-spread-bps 800 --book-limit 25
 ```
 
 ## Run Polymarket
@@ -106,6 +112,15 @@ Set the `POLYMARKET_*` and `PM_*` values in the same root `.env`, then run:
 ```bat
 python -m app.polymarket
 ```
+
+Optional runtime auto-pick modes:
+
+- `BINANCE_SELECTION_MODE=csv` -> load the first accepted row from `data/market/binance_candidates.csv`
+- `BINANCE_SELECTION_MODE=scan` -> rescan at startup, write `data/market/binance_candidates.csv`, and use the selected symbol
+- `PM_SELECTION_MODE=csv` -> load the first accepted row from `data/market/polymarket_candidates.csv`
+- `PM_SELECTION_MODE=scan` -> rescan at startup, write `data/market/polymarket_candidates.csv`, and use the selected Polymarket token id
+
+Manual `SYMBOL` and `POLYMARKET_TOKEN_ID` still work as before when the selection mode stays `manual`.
 
 The `polymarket_mm/` folder is docs plus config examples for that loop. It is not a Python package.
 

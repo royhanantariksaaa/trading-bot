@@ -4,6 +4,7 @@ import csv
 import time
 from pathlib import Path
 
+from ..selection.runtime import load_runtime_selection, scan_and_select_runtime_market
 from .config import Config
 from .exchange import create_exchange, fetch_account_snapshot, fetch_ohlcv_df, get_market_rules, prepare_htf_rsi_filter
 from .execution import create_manual_ticket, ensure_live_stop_loss, execute_live_entry, execute_live_exit, execute_paper_entry, execute_paper_exit
@@ -141,7 +142,18 @@ def _resolve_exit_reason(config: Config, state, signal: str, signal_price: float
     return ""
 
 
+def _maybe_apply_selected_symbol(config: Config) -> str | None:
+    if config.selection_mode == "manual":
+        return None
+    selection = load_runtime_selection(config.selection_csv_path, venue="binance") if config.selection_mode == "csv" else scan_and_select_runtime_market("binance", output_path=config.selection_csv_path)
+    if selection is None or not selection.symbol:
+        raise ValueError(f"No Binance market selection available via mode={config.selection_mode}")
+    config.symbol = selection.symbol
+    return f"Selection mode {config.selection_mode} picked {selection.symbol} ({selection.source})"
+
+
 def run_bot(config: Config) -> None:
+    selection_note = _maybe_apply_selected_symbol(config)
     exchange = create_exchange(config)
     market_rules = get_market_rules(exchange, config.symbol)
     trades_path = config.trades_path
@@ -180,6 +192,8 @@ def run_bot(config: Config) -> None:
         config.signal_on_closed_candle,
     )
     send_status(notifier, startup)
+    if selection_note:
+        send_status(notifier, selection_note)
     maybe_send_daily_summary(config, notifier, state_path, tickets_path, trades_path)
 
     htf1 = None

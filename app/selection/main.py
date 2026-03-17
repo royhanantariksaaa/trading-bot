@@ -10,6 +10,7 @@ from ..utils.storage import market_data_path, resolve_project_path
 from .binance import scan_binance_markets
 from .export import write_selection_csv
 from .filters import SelectionFilters
+from .polymarket import polymarket_filters, polymarket_scoring, scan_polymarket_markets
 from .scoring import ScoringConfig
 
 
@@ -26,14 +27,15 @@ def _parse_quotes(raw: list[str]) -> tuple[str, ...]:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m app.selection",
-        description="Scan Binance spot markets, score candidates, and export a ranked CSV to data/market/.",
+        description="Scan Binance or Polymarket markets, score candidates, and export a ranked CSV to data/market/.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    parser.add_argument("--venue", choices=("binance", "polymarket"), default="binance", help="Venue to scan")
     parser.add_argument(
         "--output",
         type=str,
         default="",
-        help="CSV output path. Defaults to data/market/binance_candidates.csv",
+        help="CSV output path. Defaults to data/market/<venue>_candidates.csv",
     )
     parser.add_argument("--top", type=int, default=20, help="How many ranked candidates to print")
     parser.add_argument("--allowed-quotes", nargs="+", default=["USDT", "USDC"], help="Allowed quote assets")
@@ -57,40 +59,76 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=env_bool(os.getenv("BINANCE_SELECTION_TESTNET"), False),
         help="Use Binance testnet endpoints",
     )
+    parser.add_argument(
+        "--polymarket-outcome",
+        choices=("yes", "no", "all"),
+        default=os.getenv("PM_SELECTION_OUTCOME", "yes").strip().lower() or "yes",
+        help="Which Polymarket outcomes to scan",
+    )
+    parser.add_argument(
+        "--book-limit",
+        type=int,
+        default=int(os.getenv("PM_SELECTION_BOOK_LIMIT", "25")),
+        help="How many Polymarket markets get a live CLOB book fetch",
+    )
     return parser.parse_args(argv)
 
 
-def _resolve_output_path(raw_output: str) -> Path:
+def _resolve_output_path(raw_output: str, venue: str) -> Path:
     if raw_output:
         return resolve_project_path(raw_output)
-    return market_data_path("binance_candidates.csv")
+    return market_data_path(f"{venue.strip().lower()}_candidates.csv")
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    filters = SelectionFilters(
-        allowed_quotes=_parse_quotes(args.allowed_quotes),
-        min_last_price=args.min_last_price,
-        min_quote_volume_24h=args.min_quote_volume,
-        min_trade_count_24h=args.min_trade_count,
-        max_spread_bps=args.max_spread_bps,
-        max_entry_notional=args.max_entry_notional,
-    )
-    scoring = ScoringConfig(
-        volume_target_quote_24h=args.liquidity_target,
-        trade_count_target_24h=args.trade_count_target,
-        spread_cap_bps=args.spread_cap_bps,
-        movement_target_pct=args.movement_target_pct,
-    )
+    venue = args.venue.strip().lower()
+    parsed_quotes = _parse_quotes(args.allowed_quotes)
+    if venue == "polymarket":
+        filters = polymarket_filters(args.max_entry_notional, allowed_quotes=parsed_quotes or ("USDC",))
+        filters.min_last_price = args.min_last_price
+        filters.min_quote_volume_24h = args.min_quote_volume
+        filters.min_trade_count_24h = args.min_trade_count
+        filters.max_spread_bps = args.max_spread_bps
+        scoring = polymarket_scoring()
+        scoring.volume_target_quote_24h = args.liquidity_target
+        scoring.trade_count_target_24h = args.trade_count_target
+        scoring.spread_cap_bps = args.spread_cap_bps
+        scoring.movement_target_pct = args.movement_target_pct
+    else:
+        filters = SelectionFilters(
+            allowed_quotes=parsed_quotes,
+            min_last_price=args.min_last_price,
+            min_quote_volume_24h=args.min_quote_volume,
+            min_trade_count_24h=args.min_trade_count,
+            max_spread_bps=args.max_spread_bps,
+            max_entry_notional=args.max_entry_notional,
+        )
+        scoring = ScoringConfig(
+            volume_target_quote_24h=args.liquidity_target,
+            trade_count_target_24h=args.trade_count_target,
+            spread_cap_bps=args.spread_cap_bps,
+            movement_target_pct=args.movement_target_pct,
+        )
 
     try:
-        result = scan_binance_markets(
-            filters=filters,
-            scoring=scoring,
-            allowed_quotes=filters.allowed_quotes,
-            use_testnet=args.testnet,
-        )
-        output_path = _resolve_output_path(args.output)
+        if venue == "polymarket":
+            result = scan_polymarket_markets(
+                filters=filters,
+                scoring=scoring,
+                allowed_quotes=filters.allowed_quotes,
+                outcome_mode=args.polymarket_outcome,
+                limit=max(args.top, args.book_limit, 25),
+                book_limit=args.book_limit,
+            )
+        else:
+            result = scan_binance_markets(
+                filters=filters,
+                scoring=scoring,
+                allowed_quotes=filters.allowed_quotes,
+                use_testnet=args.testnet,
+            )
+        output_path = _resolve_output_path(args.output, venue)
         write_selection_csv(result, output_path)
     except Exception as exc:
         print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)

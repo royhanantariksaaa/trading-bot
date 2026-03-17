@@ -46,10 +46,23 @@ MAX_DAILY_LOSS_USD=1
 MAX_TRADES_PER_DAY=3
 ```
 
+## Venue layout
+
+- `trading_bot/binance/`: Binance spot bot implementation
+- `trading_bot/polymarket/`: Polymarket market-maker implementation
+- top-level scripts like `python main.py` remain as compatibility shims
+- `polymarket_mm/` remains as a compatibility package pointing at `trading_bot.polymarket`
+
 ## Run
 
 ```bat
 python main.py
+```
+
+Or use the package entrypoint directly:
+
+```bat
+python -m trading_bot.binance.main
 ```
 
 ## Manual workflow helpers

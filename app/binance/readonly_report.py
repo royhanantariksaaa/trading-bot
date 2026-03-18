@@ -538,31 +538,52 @@ def format_live_readonly_notification(
     include_selection: bool = False,
     include_adaptive: bool = False,
     reminder: bool = False,
+    compact: bool = False,
 ) -> str:
+    title = "[BINANCE READONLY HEARTBEAT]" if reminder else ("[BINANCE READONLY COMPACT]" if compact else "[BINANCE READONLY]")
+    exposure = (
+        f"long qty={report.position.qty:.6f} (~{report.current_exposure_notional:.2f})"
+        if report.position is not None
+        else "flat"
+    )
+    price_line = (
+        f"Price: `{report.live_price:.4f}` | Signal px: `{report.signal_price:.4f}` | "
+        f"RSI: `{report.rsi:.2f}` | EMA: `{report.ema_fast:.4f}/{report.ema_slow:.4f}`"
+    )
+    action_line = f"Action: `{report.decision_action}` | Signal: `{report.signal or 'hold'}` | HTF: `{report.htf_ok}` | Exposure: `{exposure}`"
     lines = [
-        "[BINANCE READONLY HEARTBEAT]" if reminder else "[BINANCE READONLY]",
-        f"Pair: `{report.symbol}` | TF: `{report.timeframe}` | Signal: `{report.signal or 'hold'}`",
-        f"Proposed action: `{report.decision_action}` | HTF ok: `{report.htf_ok}`",
-        f"Live / Signal price: `{report.live_price:.4f}` / `{report.signal_price:.4f}` | Quote free: `{report.quote_free:.4f}`",
+        title,
+        f"Pair: `{report.symbol}` | TF: `{report.timeframe}`",
+        action_line,
+        price_line,
+        f"Reason: `{_compact_text(report.decision_reason or 'none', limit=220)}` | Quote free: `{report.quote_free:.4f}`",
     ]
+    if include_selection:
+        if report.selection is not None:
+            lines.append(f"Selected market: `{_compact_text(report.selection.summary, limit=220)}`")
+        elif report.selection_note:
+            lines.append(f"Selected market: `{_compact_text(report.selection_note, limit=220)}`")
+    if compact:
+        if report.sell_reason:
+            lines.append(f"Exit trigger: `{_compact_text(report.sell_reason, limit=180)}`")
+        if report.entry_plan is not None:
+            lines.append(
+                f"Entry preview: quote=`{report.entry_plan.quote_budget:.4f}` qty=`{report.entry_plan.estimated_qty:.6f}`"
+            )
+        elif report.exit_plan is not None:
+            lines.append(f"Exit preview: qty=`{report.exit_plan.qty:.6f}`")
+        return "\n".join(lines)
     if report.position is not None:
         lines.append(
             f"Position: `long qty={report.position.qty:.6f} entry={report.position.entry_price:.4f} stop={report.position.stop_loss:.4f} tp={report.position.take_profit:.4f}`"
         )
     else:
         lines.append("Position: `flat`")
-    if include_selection:
-        if report.selection is not None:
-            lines.append(f"Selected market: `{_compact_text(report.selection.summary, limit=220)}`")
-        elif report.selection_note:
-            lines.append(f"Selected market: `{_compact_text(report.selection_note, limit=220)}`")
     if include_adaptive:
         if report.adaptive_report is not None:
             lines.append(f"Adaptive summary: `{_compact_text(report.adaptive_report.summary(), limit=220)}`")
         elif report.adaptive_note:
             lines.append(f"Adaptive summary: `{_compact_text(report.adaptive_note, limit=220)}`")
-    if report.decision_reason:
-        lines.append(f"Reason: {report.decision_reason}")
     for reason in report.decision_reasons[:3]:
         lines.append(f"- {reason}")
     if report.sell_reason:

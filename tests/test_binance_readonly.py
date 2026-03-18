@@ -58,6 +58,17 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
         config = self._make_config()
         self.assertTrue(_adaptive_runtime_allows(config))
 
+    def test_validate_requires_positive_readonly_discord_intervals(self) -> None:
+        config = self._make_config()
+        config.readonly_compact_interval_seconds = 0
+        with self.assertRaises(ValueError):
+            config.validate()
+
+        config = self._make_config()
+        config.readonly_heartbeat_interval_seconds = 0
+        with self.assertRaises(ValueError):
+            config.validate()
+
     def _make_symbol_rules(self) -> SymbolRules:
         return SymbolRules(
             symbol="SOL/USDT",
@@ -232,8 +243,8 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
         self.assertIn("[BINANCE READONLY]", notification)
         self.assertIn("Selected market:", notification)
         self.assertIn("Adaptive summary:", notification)
-        self.assertIn("Proposed action: `BUY`", notification)
-        self.assertIn("Reason: buy signal passed sizing and filters", notification)
+        self.assertIn("Action: `BUY`", notification)
+        self.assertIn("Reason: `buy signal passed sizing and filters`", notification)
         self.assertIn("Reports:", notification)
 
         heartbeat = format_live_readonly_notification(
@@ -243,6 +254,19 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
             reminder=True,
         )
         self.assertIn("[BINANCE READONLY HEARTBEAT]", heartbeat)
+
+        compact = format_live_readonly_notification(
+            report,
+            include_selection=True,
+            compact=True,
+        )
+        self.assertIn("[BINANCE READONLY COMPACT]", compact)
+        self.assertIn("Selected market:", compact)
+        self.assertIn("RSI:", compact)
+        self.assertIn("EMA:", compact)
+        self.assertIn("Exposure:", compact)
+        self.assertNotIn("Adaptive summary:", compact)
+        self.assertNotIn("Reports:", compact)
 
         first_key = readonly_notification_key(report)
         self.assertIn("BUY", first_key)

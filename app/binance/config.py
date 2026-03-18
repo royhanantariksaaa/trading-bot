@@ -79,6 +79,8 @@ class Config:
     )
     readonly_report_path: Path = field(default_factory=binance_readonly_report_path)
     readonly_report_json_path: Path = field(default_factory=binance_readonly_report_json_path)
+    readonly_compact_interval_seconds: int = int(os.getenv("BINANCE_READONLY_COMPACT_INTERVAL_SECONDS", "120"))
+    readonly_heartbeat_interval_seconds: int = int(os.getenv("BINANCE_READONLY_HEARTBEAT_INTERVAL_SECONDS", "1800"))
     selection_rotation_loops: int = int(os.getenv("BINANCE_SELECTION_ROTATE_EVERY_LOOPS", "0"))
     selection_rotation_only_when_flat: bool = env_bool(os.getenv("BINANCE_SELECTION_ROTATE_ONLY_WHEN_FLAT"), True)
     active_strategy_profile: str = field(default="", init=False, repr=False)
@@ -112,6 +114,10 @@ class Config:
             raise ValueError("BINANCE_ADAPTIVE_MODE must be 'off', 'paper', or 'on'")
         if self.strategy_profile == "auto" and self.selection_mode == "manual":
             raise ValueError("BINANCE_STRATEGY_PROFILE=auto requires BINANCE_SELECTION_MODE=csv or scan")
+        if self.readonly_compact_interval_seconds <= 0:
+            raise ValueError("BINANCE_READONLY_COMPACT_INTERVAL_SECONDS must be > 0")
+        if self.readonly_heartbeat_interval_seconds <= 0:
+            raise ValueError("BINANCE_READONLY_HEARTBEAT_INTERVAL_SECONDS must be > 0")
         if self.selection_rotation_loops < 0:
             raise ValueError("BINANCE_SELECTION_ROTATE_EVERY_LOOPS must be >= 0")
         if self.bot_mode == "live" and not self.enable_live_trading:

@@ -98,7 +98,9 @@ If `DISCORD_WEBHOOK_URL` is configured, live readonly now also sends compact Dis
 - proposed action preview (`HOLD`, `BUY`, `SELL`, `SKIP BUY`, `SKIP SELL`)
 - key reason / trigger lines for hold, skip, buy, and sell decisions
 
-The full text/JSON reports still stay local. Discord notifications are compact and throttled: the bot sends them immediately when the higher-level readonly state changes (action / reason / selection / adaptive / entry-exit preview), sends a rounded signal-snapshot refresh at most about once every 10 minutes when only the live decision summary drifts (price / EMA / RSI / available quote / gates), and still sends a reminder at most about once per hour if nothing changes, instead of dumping the full report every loop.
+The full text/JSON reports still stay local. Discord notifications are compact and throttled: the bot sends them immediately when the higher-level readonly state changes (action / reason / selection / adaptive / entry-exit preview / open-order state), sends a short compact status refresh at most every `BINANCE_READONLY_COMPACT_INTERVAL_SECONDS` (default `120`) when only the live signal snapshot drifts, and sends a heartbeat reminder at most every `BINANCE_READONLY_HEARTBEAT_INTERVAL_SECONDS` (default `1800`) if nothing changes.
+
+The compact cadence message is intentionally near-terminal: pair / timeframe, signal, action, reason, live + signal price, RSI, EMA fast/slow, quote free, selected market when relevant, and current exposure. That keeps Discord feeling alive without reposting the giant local report every loop.
 
 Live readonly now also separates Binance dust / unactionable inventory from managed position state. If the wallet holds a tiny balance that falls below the bot's actionable sell threshold for the tracked symbol (roughly Binance min-notional with a small 5% safety buffer, plus lot-size checks), that inventory stays visible in the report/JSON under `dust_holdings` but does not count as an open managed position.
 

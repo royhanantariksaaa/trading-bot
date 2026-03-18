@@ -292,8 +292,8 @@ def run_bot(config: Config) -> None:
     readonly_last_notification_key = ""
     readonly_last_decision_summary_key = ""
     readonly_last_notification_loop = -1
-    readonly_notification_interval_loops = max(1, int(3600 / max(config.poll_seconds, 1)))
-    readonly_decision_summary_interval_loops = max(1, int(600 / max(config.poll_seconds, 1)))
+    readonly_heartbeat_interval_loops = max(1, int(config.readonly_heartbeat_interval_seconds / max(config.poll_seconds, 1)))
+    readonly_compact_interval_loops = max(1, int(config.readonly_compact_interval_seconds / max(config.poll_seconds, 1)))
 
     if config.live_readonly_mode:
         startup = format_readonly_startup_message(
@@ -515,15 +515,15 @@ def run_bot(config: Config) -> None:
                 key_changed = notification_key != readonly_last_notification_key
                 heartbeat_due = (
                     readonly_last_notification_loop < 0
-                    or (loops - readonly_last_notification_loop) >= readonly_notification_interval_loops
+                    or (loops - readonly_last_notification_loop) >= readonly_heartbeat_interval_loops
                 )
                 decision_summary_changed = decision_summary_key != readonly_last_decision_summary_key
-                decision_summary_due = (
+                compact_refresh_due = (
                     readonly_last_notification_loop >= 0
-                    and (loops - readonly_last_notification_loop) >= readonly_decision_summary_interval_loops
+                    and decision_summary_changed
+                    and (loops - readonly_last_notification_loop) >= readonly_compact_interval_loops
                 )
-                summary_refresh_due = decision_summary_changed and decision_summary_due and not key_changed
-                should_send_readonly = key_changed or summary_refresh_due or heartbeat_due
+                should_send_readonly = key_changed or compact_refresh_due or heartbeat_due
                 if should_send_readonly:
                     send_status(
                         notifier,
@@ -531,7 +531,8 @@ def run_bot(config: Config) -> None:
                             readonly_report,
                             include_selection=key_changed or heartbeat_due,
                             include_adaptive=key_changed or heartbeat_due,
-                            reminder=heartbeat_due and not key_changed and not summary_refresh_due and readonly_last_notification_loop >= 0,
+                            reminder=heartbeat_due and not key_changed and not compact_refresh_due and readonly_last_notification_loop >= 0,
+                            compact=compact_refresh_due and not key_changed,
                         ),
                     )
                     readonly_last_notification_key = notification_key

@@ -26,6 +26,14 @@ Use this as the final pre-live checklist for the refactored bot.
 
 ---
 
+## Read-only inspection
+
+- [ ] live read-only mode runs against a real Binance account with `USE_TESTNET=false`
+- [ ] report prints wallet holdings, free quote balance, current exposure, selected candidate, proposed action, proposed entry/size/SL/TP, and hold/skip/buy reasons
+- [ ] report explicitly states that submit/test/cancel paths are disabled
+
+---
+
 ## Binance execution safety
 
 - [ ] every order has a persisted `newClientOrderId`

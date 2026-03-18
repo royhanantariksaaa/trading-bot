@@ -72,6 +72,25 @@ MAX_DAILY_LOSS_USD=1
 MAX_TRADES_PER_DAY=3
 ```
 
+Read-only live inspection against a real Binance account:
+
+```env
+BOT_MODE=live_readonly
+EXECUTION_MODE=auto
+ENABLE_LIVE_TRADING=false
+USE_TESTNET=false
+RECONCILE_ON_START=true
+ORDER_TEST_BEFORE_SUBMIT=false
+BINANCE_SELECTION_MODE=scan
+BINANCE_STRATEGY_PROFILE=auto
+BINANCE_ADAPTIVE_MODE=paper
+BINANCE_READONLY_REPORT_PATH=data/market/binance_live_readonly_report.txt
+BINANCE_READONLY_REPORT_JSON_PATH=data/market/binance_live_readonly_report.json
+```
+
+This mode reads balances, account state, open orders, the selected market, and the adaptive overlay, then writes a human-readable report and JSON snapshot. It never calls submit, test, or cancel order methods.
+`BINANCE_ADAPTIVE_MODE=paper` is accepted in this mode because `BOT_MODE=live_readonly` is non-executing.
+
 ## Run Binance
 
 Default Binance wrapper:
@@ -114,7 +133,7 @@ python -m app.binance
 
 When `BINANCE_SELECTION_MODE` is `csv` or `scan`, the selected market is also classified into a conservative profile (`trend`, `range`, `volatile`, or `slow_liquid`) and that profile is applied before the bot starts. Use `BINANCE_STRATEGY_PROFILE=manual` to keep the base manual strategy settings, or set `BINANCE_STRATEGY_PROFILE=<profile>` to force one.
 
-If you also set `BINANCE_ADAPTIVE_MODE=paper`, Binance will do a second conservative pass using recent OHLCV candles and ticker spread data, then layer one of the bounded adaptive policies on top of the selected market profile. That adaptive pass only runs in paper mode unless you explicitly set `BINANCE_ADAPTIVE_MODE=on`.
+If you also set `BINANCE_ADAPTIVE_MODE=paper`, Binance will do a second conservative pass using recent OHLCV candles and ticker spread data, then layer one of the bounded adaptive policies on top of the selected market profile. That adaptive pass runs in paper mode and in `BOT_MODE=live_readonly` because the mode is non-executing. Use `BINANCE_ADAPTIVE_MODE=on` to allow the same overlay in live mode.
 
 ## Run Portfolio Foundation
 
@@ -166,8 +185,8 @@ Optional runtime auto-pick modes:
 - `BINANCE_STRATEGY_PROFILE=auto` -> apply the profile chosen from the selected market regime
 - `BINANCE_STRATEGY_PROFILE=manual` -> keep the existing manual strategy values even when selection mode is `csv` or `scan`
 - `BINANCE_STRATEGY_PROFILE=trend|range|volatile|slow_liquid` -> force a specific profile
-- `BINANCE_ADAPTIVE_MODE=paper` -> apply the recent-history adaptive overlay only in paper mode
-- `BINANCE_ADAPTIVE_MODE=on` -> apply the recent-history adaptive overlay in paper or live mode
+- `BINANCE_ADAPTIVE_MODE=paper` -> apply the recent-history adaptive overlay only in paper mode or `BOT_MODE=live_readonly`
+- `BINANCE_ADAPTIVE_MODE=on` -> apply the recent-history adaptive overlay in paper, live, or `BOT_MODE=live_readonly`
 - `PM_SELECTION_MODE=csv` -> load the first accepted row from `data/market/polymarket_candidates.csv`
 - `PM_SELECTION_MODE=scan` -> rescan at startup, write `data/market/polymarket_candidates.csv`, and use the selected Polymarket token id
 
@@ -206,6 +225,8 @@ Defaults live under `data/`:
 - `data/backtests/backtest_trades.csv`: default Binance backtest output
 - `data/market/binance_adaptive_report.txt`: latest Binance adaptive decision report
 - `data/market/binance_adaptive_report.json`: machine-readable adaptive decision report
+- `data/market/binance_live_readonly_report.txt`: latest Binance live read-only inspection report
+- `data/market/binance_live_readonly_report.json`: machine-readable live read-only inspection report
 - `data/state/portfolio_state.json`: portfolio ledger state for the allocator/paper run
 - `data/market/portfolio_allocation_report.txt`: latest portfolio allocation report
 - `data/market/portfolio_allocation_report.json`: machine-readable portfolio allocation report
@@ -213,7 +234,7 @@ Defaults live under `data/`:
 - `data/logs/polymarket_runs.csv`: Polymarket loop log
 - `data/market/`: ad hoc market CSV snapshots and local samples
 
-All of those paths can be overridden with env vars such as `BINANCE_STATE_PATH`, `BINANCE_TRADES_PATH`, `BINANCE_BACKTEST_OUTPUT_PATH`, `BINANCE_ADAPTIVE_REPORT_PATH`, `PORTFOLIO_STATE_PATH`, `PORTFOLIO_REPORT_PATH`, `PORTFOLIO_REPORT_JSON_PATH`, `PM_STATE_PATH`, and `PM_LOG_PATH`.
+All of those paths can be overridden with env vars such as `BINANCE_STATE_PATH`, `BINANCE_TRADES_PATH`, `BINANCE_BACKTEST_OUTPUT_PATH`, `BINANCE_ADAPTIVE_REPORT_PATH`, `BINANCE_READONLY_REPORT_PATH`, `BINANCE_READONLY_REPORT_JSON_PATH`, `PORTFOLIO_STATE_PATH`, `PORTFOLIO_REPORT_PATH`, `PORTFOLIO_REPORT_JSON_PATH`, `PM_STATE_PATH`, and `PM_LOG_PATH`.
 
 ## Notes
 

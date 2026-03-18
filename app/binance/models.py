@@ -4,6 +4,14 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class WalletHolding:
+    asset: str
+    free: float
+    locked: float
+    total: float
+
+
+@dataclass
 class PositionState:
     symbol: str
     side: str
@@ -44,6 +52,7 @@ class AccountSnapshot:
     base_asset: str
     base_free: float
     base_locked: float
+    holdings: list[WalletHolding] = field(default_factory=list)
     maker_fee: float | None = None
     taker_fee: float | None = None
     captured_at: str = ""

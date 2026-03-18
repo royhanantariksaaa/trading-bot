@@ -7,14 +7,15 @@ from pathlib import Path
 from ..selection.models import MarketMetrics
 from ..selection.profiles import StrategyProfileSelection, build_strategy_profile
 from ..selection.runtime import RuntimeSelection, load_runtime_selection, maybe_rotate_runtime_selection, scan_and_select_runtime_market
-from .adaptive import evaluate_adaptive_policy
+from .adaptive import AdaptiveDecisionReport, evaluate_adaptive_policy
 from .config import Config
 from .exchange import create_exchange, fetch_account_snapshot, fetch_ohlcv_df, get_market_rules, prepare_htf_rsi_filter
 from .execution import create_manual_ticket, ensure_live_stop_loss, execute_live_entry, execute_live_exit, execute_paper_entry, execute_paper_exit
-from .formatters import format_no_trade_message, format_startup_message, format_status_message
+from .formatters import format_no_trade_message, format_readonly_startup_message, format_startup_message, format_status_message
 from .logger import fmt_pct, log_event
 from .notifier import DiscordNotifier
 from .paper_wallet import PaperWallet
+from .readonly_report import build_live_readonly_report, render_live_readonly_report, write_live_readonly_report
 from .reconcile import reconcile_live_state
 from .risk import build_entry_plan, build_exit_plan
 from .state import clear_pending_ticket, load_state, pending_ticket_clear_reason, save_state, today_str
@@ -154,14 +155,14 @@ def _resolve_exit_reason(config: Config, state, signal: str, signal_price: float
     if config.bot_mode == "paper":
         if low_price <= state.position.stop_loss:
             return "stop_loss"
-    if config.bot_mode == "live" and not any(order.side == "SELL" and order.stop_price > 0 for order in state.open_orders):
+    if config.bot_mode in {"live", "live_readonly"} and not any(order.side == "SELL" and order.stop_price > 0 for order in state.open_orders):
         if low_price <= state.position.stop_loss:
             return "stop_loss"
     if high_price >= state.position.take_profit:
         return "take_profit"
     if signal == "sell":
         return "ema_cross_down"
-    if signal_price <= state.position.stop_loss and config.bot_mode != "live":
+    if signal_price <= state.position.stop_loss and config.bot_mode not in {"live", "live_readonly"}:
         return "stop_loss"
     return ""
 
@@ -176,15 +177,22 @@ def _resolve_runtime_profile(config: Config, selection: RuntimeSelection) -> Str
     return build_strategy_profile(mode, selection.venue, metrics, source="override")
 
 
-def _maybe_apply_selected_symbol(config: Config) -> str | None:
+def _maybe_apply_selected_symbol(config: Config) -> tuple[str | None, RuntimeSelection | None]:
     if config.selection_mode == "manual":
         config.apply_strategy_profile(None)
         config.active_selection_profile = ""
         config.active_selection_profile_reason = ""
         if config.strategy_profile:
-            return f"Selection mode manual ignores BINANCE_STRATEGY_PROFILE={config.strategy_profile}; manual symbol/settings stay untouched."
-        return None
-    selection = load_runtime_selection(config.selection_csv_path, venue="binance") if config.selection_mode == "csv" else scan_and_select_runtime_market("binance", output_path=config.selection_csv_path)
+            return (
+                f"Selection mode manual ignores BINANCE_STRATEGY_PROFILE={config.strategy_profile}; manual symbol/settings stay untouched.",
+                None,
+            )
+        return None, None
+    selection = (
+        load_runtime_selection(config.selection_csv_path, venue="binance")
+        if config.selection_mode == "csv"
+        else scan_and_select_runtime_market("binance", output_path=config.selection_csv_path)
+    )
     if selection is None or not selection.symbol:
         raise ValueError(f"No Binance market selection available via mode={config.selection_mode}")
     config.symbol = selection.symbol
@@ -194,8 +202,14 @@ def _maybe_apply_selected_symbol(config: Config) -> str | None:
     config.active_selection_profile_reason = profile.reason if profile is not None else ""
     report_note = f" report={selection.report_path}" if selection.report_path else ""
     if profile is None:
-        return f"Selection mode {config.selection_mode} picked {selection.symbol} ({selection.source}). Manual strategy settings preserved.{report_note}"
-    return f"Selection mode {config.selection_mode} picked {selection.symbol} profile={profile.name} ({profile.source}) because {profile.reason}.{report_note}"
+        return (
+            f"Selection mode {config.selection_mode} picked {selection.symbol} ({selection.source}). Manual strategy settings preserved.{report_note}",
+            selection,
+        )
+    return (
+        f"Selection mode {config.selection_mode} picked {selection.symbol} profile={profile.name} ({profile.source}) because {profile.reason}.{report_note}",
+        selection,
+    )
 
 
 def _adaptive_runtime_allows(config: Config) -> bool:
@@ -205,19 +219,19 @@ def _adaptive_runtime_allows(config: Config) -> bool:
         return False
     if config.resolved_strategy_profile_mode != "auto":
         return False
-    if config.adaptive_mode == "paper" and config.bot_mode != "paper":
+    if config.adaptive_mode == "paper" and config.bot_mode not in {"paper", "live_readonly"}:
         return False
     return True
 
 
-def _maybe_apply_adaptive_policy(config: Config, exchange) -> str | None:
+def _maybe_apply_adaptive_policy(config: Config, exchange) -> tuple[str | None, AdaptiveDecisionReport | None]:
     if not _adaptive_runtime_allows(config):
-        return None
+        return None, None
     report = evaluate_adaptive_policy(config, exchange)
     report_note = f" report={report.report_path}" if report.report_path else ""
     if report.applied:
-        return f"Adaptive policy applied: {report.summary()}{report_note}"
-    return f"Adaptive policy fallback: {report.fallback_reason or report.regime_reason}{report_note}"
+        return f"Adaptive policy applied: {report.summary()}{report_note}", report
+    return f"Adaptive policy fallback: {report.fallback_reason or report.regime_reason}{report_note}", report
 
 
 def _can_rotate_symbol(config: Config, state) -> tuple[bool, str]:
@@ -235,11 +249,11 @@ def _can_rotate_symbol(config: Config, state) -> tuple[bool, str]:
 
 
 def run_bot(config: Config) -> None:
-    selection_note = _maybe_apply_selected_symbol(config)
+    selection_note, selected_runtime = _maybe_apply_selected_symbol(config)
     rotation = config.rotation_controller
     exchange = create_exchange(config)
     market_rules = get_market_rules(exchange, config.symbol)
-    adaptive_note = _maybe_apply_adaptive_policy(config, exchange)
+    adaptive_note, adaptive_report = _maybe_apply_adaptive_policy(config, exchange)
     trades_path = config.trades_path
     notifier = DiscordNotifier(config.discord_webhook_url)
     state_path = config.state_path
@@ -247,43 +261,68 @@ def run_bot(config: Config) -> None:
     decision_log_path = config.decision_log_path
 
     state = load_state(state_path)
-    if state.paper_balance_usdt <= 0:
-        state.paper_balance_usdt = config.starting_balance
-    wallet = PaperWallet.from_state(
-        state,
-        trades_path=trades_path,
-        starting_balance=config.starting_balance,
-        fee_rate=config.fee_rate,
-        slippage_pct=config.slippage_buffer_pct,
-    )
+    wallet = None
+    if config.bot_mode == "paper":
+        if state.paper_balance_usdt <= 0:
+            state.paper_balance_usdt = config.starting_balance
+        wallet = PaperWallet.from_state(
+            state,
+            trades_path=trades_path,
+            starting_balance=config.starting_balance,
+            fee_rate=config.fee_rate,
+            slippage_pct=config.slippage_buffer_pct,
+        )
 
-    if config.bot_mode == "live" and config.reconcile_on_start:
+    if config.live_data_mode and config.reconcile_on_start:
         state.account_snapshot = reconcile_live_state(config, exchange, state, market_rules)
-    elif config.bot_mode == "live":
+    elif config.live_data_mode:
         state.account_snapshot = fetch_account_snapshot(exchange, market_rules)
-    hygiene_message = _clear_stale_pending_ticket_if_safe(config, state, tickets_path)
-    save_state(state_path, state)
+    hygiene_message = ""
+    if config.bot_mode != "live_readonly":
+        hygiene_message = _clear_stale_pending_ticket_if_safe(config, state, tickets_path)
+        save_state(state_path, state)
 
-    startup = format_startup_message(
-        config.symbol,
-        config.timeframe,
-        _current_quote_balance(config, state, wallet),
-        fmt_pct(config.risk_per_trade),
-        fmt_pct(config.stop_loss_pct),
-        fmt_pct(config.take_profit_pct),
-        _build_strategy_label(config),
-        config.execution_mode,
-        config.approval_mode,
-        config.signal_on_closed_candle,
-    )
-    send_status(notifier, startup)
+    if config.live_readonly_mode:
+        startup = format_readonly_startup_message(
+            config.symbol,
+            config.timeframe,
+            _current_quote_balance(config, state, wallet),
+            _build_strategy_label(config),
+            config.execution_mode,
+            config.selection_mode,
+            str(config.readonly_report_path),
+            str(config.readonly_report_json_path),
+            selection_summary=selected_runtime.summary if selected_runtime is not None else (selection_note or ""),
+            adaptive_summary=adaptive_report.summary() if adaptive_report is not None else (adaptive_note or ""),
+            use_testnet=config.use_testnet,
+            enable_live_trading=config.enable_live_trading,
+        )
+        print(startup, flush=True)
+    else:
+        startup = format_startup_message(
+            config.symbol,
+            config.timeframe,
+            _current_quote_balance(config, state, wallet),
+            fmt_pct(config.risk_per_trade),
+            fmt_pct(config.stop_loss_pct),
+            fmt_pct(config.take_profit_pct),
+            _build_strategy_label(config),
+            config.execution_mode,
+            config.approval_mode,
+            config.signal_on_closed_candle,
+        )
+        send_status(notifier, startup)
     if hygiene_message:
-        send_status(notifier, hygiene_message)
-    if selection_note:
+        if config.live_readonly_mode:
+            print(hygiene_message)
+        else:
+            send_status(notifier, hygiene_message)
+    if selection_note and not config.live_readonly_mode:
         send_status(notifier, selection_note)
-    if adaptive_note:
+    if adaptive_note and not config.live_readonly_mode:
         send_status(notifier, adaptive_note)
-    maybe_send_daily_summary(config, notifier, state_path, tickets_path, trades_path)
+    if not config.live_readonly_mode:
+        maybe_send_daily_summary(config, notifier, state_path, tickets_path, trades_path)
 
     htf1 = None
     htf2 = None
@@ -292,6 +331,7 @@ def run_bot(config: Config) -> None:
         if config.htf_2_enabled:
             htf2 = prepare_htf_rsi_filter(exchange, config.symbol, config.htf_2_timeframe, config.htf_2_rsi_period, config.htf_2_rsi_min)
 
+    reload_state_each_loop = not config.live_readonly_mode
     loops = 0
     while True:
         try:
@@ -299,7 +339,8 @@ def run_bot(config: Config) -> None:
                 send_status(notifier, "Kill switch enabled. Exiting.")
                 break
 
-            state = load_state(state_path)
+            if reload_state_each_loop:
+                state = load_state(state_path)
             if config.bot_mode == "paper":
                 wallet = PaperWallet.from_state(
                     state,
@@ -314,10 +355,12 @@ def run_bot(config: Config) -> None:
                     state.account_snapshot = reconcile_live_state(config, exchange, state, market_rules)
                 else:
                     state.account_snapshot = fetch_account_snapshot(exchange, market_rules)
-                if config.execution_mode == "auto" and state.position is not None:
+                if config.bot_mode == "live" and config.execution_mode == "auto" and state.position is not None:
                     ensure_live_stop_loss(exchange=exchange, config=config, state=state, rules=market_rules, candle_time=state.last_signal_candle_time or today_str())
 
-            hygiene_message = _clear_stale_pending_ticket_if_safe(config, state, tickets_path)
+            hygiene_message = ""
+            if not config.live_readonly_mode:
+                hygiene_message = _clear_stale_pending_ticket_if_safe(config, state, tickets_path)
             if hygiene_message:
                 send_status(notifier, hygiene_message)
 
@@ -334,6 +377,7 @@ def run_bot(config: Config) -> None:
                     )
                     rotation_messages: list[str] = []
                     if decision.changed and decision.selection is not None:
+                        selected_runtime = decision.selection
                         config.symbol = decision.selection.symbol
                         profile = _resolve_runtime_profile(config, decision.selection)
                         config.apply_strategy_profile(profile)
@@ -342,7 +386,7 @@ def run_bot(config: Config) -> None:
                         rotation_messages.append(f"Selector rotation applied: {decision.reason}. report={decision.selection.report_path}")
                     else:
                         log_event("INFO", f"Selector rotation check: {decision.reason}")
-                    adaptive_note = _maybe_apply_adaptive_policy(config, exchange)
+                    adaptive_note, adaptive_report = _maybe_apply_adaptive_policy(config, exchange)
                     if adaptive_note:
                         rotation_messages.append(adaptive_note)
                     if config.use_htf_filter:
@@ -422,9 +466,42 @@ def run_bot(config: Config) -> None:
 
             htf_text = " | ".join(htf_parts) if htf_parts else "htf=off"
             available_quote = _current_quote_balance(config, state, wallet if config.bot_mode == "paper" else None)
+            sell_reason = _resolve_exit_reason(config, state, signal, signal_price, live_row) if state.position is not None else ""
+
+            if config.live_readonly_mode:
+                readonly_report = build_live_readonly_report(
+                    config=config,
+                    state=state,
+                    market_rules=market_rules,
+                    signal=signal,
+                    signal_price=signal_price,
+                    live_price=live_price,
+                    ema_fast=ema_fast,
+                    ema_slow=ema_slow,
+                    rsi=rsi,
+                    gates=gates,
+                    htf_text=htf_text,
+                    htf_ok=htf_ok,
+                    available_quote=available_quote,
+                    candle_time=candle_time,
+                    sell_reason=sell_reason,
+                    selection=selected_runtime,
+                    selection_note=selection_note or "",
+                    adaptive_report=adaptive_report,
+                    adaptive_note=adaptive_note or "",
+                )
+                write_live_readonly_report(
+                    readonly_report,
+                    config.readonly_report_path,
+                    config.readonly_report_json_path,
+                )
+                print(render_live_readonly_report(readonly_report), end="", flush=True)
+                loops += 1
+                state.last_processed_candle_time = candle_time
+                time.sleep(config.poll_seconds)
+                continue
 
             if state.position is not None:
-                sell_reason = _resolve_exit_reason(config, state, signal, signal_price, live_row)
                 if sell_reason:
                     if state.last_signal_candle_time == candle_time and (state.pending_action == "SELL" or any(order.side == "SELL" for order in state.open_orders)):
                         log_event("INFO", f"Sell action already registered for candle {candle_time}; skipping duplicate sell signal.")

@@ -11,6 +11,8 @@ from ..utils.storage import (
     binance_backtest_output_path,
     binance_decision_log_path,
     binance_execution_log_path,
+    binance_readonly_report_json_path,
+    binance_readonly_report_path,
     binance_state_path,
     binance_tickets_path,
     binance_trades_path,
@@ -75,6 +77,8 @@ class Config:
             os.getenv("BINANCE_ADAPTIVE_REPORT_PATH", str(market_data_path("binance_adaptive_report.txt")))
         )
     )
+    readonly_report_path: Path = field(default_factory=binance_readonly_report_path)
+    readonly_report_json_path: Path = field(default_factory=binance_readonly_report_json_path)
     selection_rotation_loops: int = int(os.getenv("BINANCE_SELECTION_ROTATE_EVERY_LOOPS", "0"))
     selection_rotation_only_when_flat: bool = env_bool(os.getenv("BINANCE_SELECTION_ROTATE_ONLY_WHEN_FLAT"), True)
     active_strategy_profile: str = field(default="", init=False, repr=False)
@@ -89,8 +93,8 @@ class Config:
     backtest_output_path: Path = field(default_factory=binance_backtest_output_path)
 
     def validate(self) -> None:
-        if self.bot_mode not in {"paper", "live"}:
-            raise ValueError("BOT_MODE must be 'paper' or 'live'")
+        if self.bot_mode not in {"paper", "live", "live_readonly"}:
+            raise ValueError("BOT_MODE must be 'paper', 'live', or 'live_readonly'")
         if self.execution_mode not in {"manual", "auto"}:
             raise ValueError("EXECUTION_MODE must be 'manual' or 'auto'")
         if self.approval_mode not in {"none", "discord", "terminal"}:
@@ -112,8 +116,12 @@ class Config:
             raise ValueError("BINANCE_SELECTION_ROTATE_EVERY_LOOPS must be >= 0")
         if self.bot_mode == "live" and not self.enable_live_trading:
             raise ValueError("Live mode requires ENABLE_LIVE_TRADING=true")
-        if self.bot_mode == "live" and (not self.api_key or not self.api_secret):
-            raise ValueError("Live mode requires BINANCE_API_KEY and BINANCE_SECRET")
+        if self.bot_mode in {"live", "live_readonly"} and (not self.api_key or not self.api_secret):
+            raise ValueError("Live modes require BINANCE_API_KEY and BINANCE_SECRET")
+        if self.bot_mode == "live_readonly" and self.use_testnet:
+            raise ValueError("Live read-only mode requires USE_TESTNET=false")
+        if self.bot_mode == "live_readonly" and self.execution_mode not in {"manual", "auto"}:
+            raise ValueError("Live read-only mode requires EXECUTION_MODE to be 'manual' or 'auto'")
         if self.risk_per_trade <= 0 or self.risk_per_trade > 0.05:
             raise ValueError("RISK_PER_TRADE must be between 0 and 0.05")
         if self.stop_loss_pct <= 0:
@@ -153,6 +161,14 @@ class Config:
         if self.binance_api_base_url:
             return self.binance_api_base_url
         return None
+
+    @property
+    def live_readonly_mode(self) -> bool:
+        return self.bot_mode == "live_readonly"
+
+    @property
+    def live_data_mode(self) -> bool:
+        return self.bot_mode in {"live", "live_readonly"}
 
     @property
     def resolved_strategy_profile_mode(self) -> str:

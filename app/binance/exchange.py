@@ -8,7 +8,7 @@ import ccxt
 import pandas as pd
 
 from .config import Config
-from .models import AccountSnapshot, OrderState
+from .models import AccountSnapshot, OrderState, WalletHolding
 
 
 class ExchangeValidationError(ValueError):
@@ -52,6 +52,33 @@ def _maybe_apply_base_url_override(exchange, config: Config) -> None:
     exchange.urls["api"]["public"] = api_v3
     exchange.urls["api"]["private"] = api_v3
     exchange.urls["api"]["v1"] = api_v1
+
+
+def _wallet_holdings_from_balance(balance: dict, *, quote_asset: str, base_asset: str) -> list[WalletHolding]:
+    free = balance.get("free", {}) or {}
+    used = balance.get("used", {}) or balance.get("locked", {}) or {}
+    total = balance.get("total", {}) or {}
+    assets = set()
+    for payload in (free, used, total):
+        if isinstance(payload, dict):
+            assets.update(str(asset) for asset in payload.keys())
+    ordered_assets = sorted(assets, key=lambda asset: (0 if asset in {quote_asset, base_asset} else 1, asset))
+    holdings: list[WalletHolding] = []
+    for asset in ordered_assets:
+        asset_free = float(free.get(asset) or 0)
+        asset_locked = float(used.get(asset) or 0)
+        asset_total = float(total.get(asset) or (asset_free + asset_locked))
+        if asset_free <= 0 and asset_locked <= 0 and asset_total <= 0:
+            continue
+        holdings.append(
+            WalletHolding(
+                asset=asset,
+                free=asset_free,
+                locked=asset_locked,
+                total=asset_total,
+            )
+        )
+    return holdings
 
 
 def create_exchange(config: Config):
@@ -258,6 +285,7 @@ def fetch_account_snapshot(exchange, rules: SymbolRules) -> AccountSnapshot:
         base_asset=rules.base_asset,
         base_free=float(base.get("free") or 0),
         base_locked=float(base.get("used") or base.get("locked") or 0),
+        holdings=_wallet_holdings_from_balance(balance, quote_asset=rules.quote_asset, base_asset=rules.base_asset),
         maker_fee=maker_fee,
         taker_fee=taker_fee,
         captured_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),

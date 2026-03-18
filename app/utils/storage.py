@@ -58,6 +58,14 @@ def binance_execution_log_path() -> Path:
     return ensure_parent(resolve_env_path("BINANCE_EXECUTION_LOG_PATH", LOG_DATA_DIR / "live_execution_log.csv"))
 
 
+def binance_readonly_report_path() -> Path:
+    return ensure_parent(resolve_env_path("BINANCE_READONLY_REPORT_PATH", MARKET_DATA_DIR / "binance_live_readonly_report.txt"))
+
+
+def binance_readonly_report_json_path() -> Path:
+    return ensure_parent(resolve_env_path("BINANCE_READONLY_REPORT_JSON_PATH", MARKET_DATA_DIR / "binance_live_readonly_report.json"))
+
+
 def binance_backtest_output_path() -> Path:
     return ensure_parent(resolve_env_path("BINANCE_BACKTEST_OUTPUT_PATH", BACKTEST_DATA_DIR / "backtest_trades.csv"))
 

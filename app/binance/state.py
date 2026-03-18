@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Literal
 from pathlib import Path
 
-from .models import AccountSnapshot, OrderState, PositionState
+from .models import AccountSnapshot, OrderState, PositionState, WalletHolding
 
 
 @dataclass
@@ -57,7 +57,15 @@ def _coerce_orders(payload: list[dict] | None) -> list[OrderState]:
 def _coerce_account_snapshot(payload: dict | None) -> AccountSnapshot | None:
     if not payload:
         return None
-    return AccountSnapshot(**payload)
+    data = dict(payload)
+    holdings = []
+    for row in data.get("holdings") or []:
+        if isinstance(row, WalletHolding):
+            holdings.append(row)
+        elif isinstance(row, dict):
+            holdings.append(WalletHolding(**row))
+    data["holdings"] = holdings
+    return AccountSnapshot(**data)
 
 
 def _normalize_loaded_state(data: dict) -> BotState:

@@ -8,11 +8,14 @@ import ccxt
 import pandas as pd
 
 from .config import Config
-from .models import AccountSnapshot, OrderState, WalletHolding
+from .models import AccountSnapshot, DustHolding, OrderState, WalletHolding
 
 
 class ExchangeValidationError(ValueError):
     pass
+
+
+DUST_NOTIONAL_BUFFER = 1.05
 
 
 @dataclass
@@ -203,6 +206,44 @@ def validate_market_sell_quantity(quantity: float, price: float, rules: SymbolRu
     if rules.max_notional is not None and notional > rules.max_notional:
         raise ExchangeValidationError(f"Sell notional {notional:.8f} is above max notional {rules.max_notional:.8f}")
     return rounded_qty
+
+
+def actionable_notional_threshold(price: float, rules: SymbolRules, *, buffer: float = DUST_NOTIONAL_BUFFER) -> float:
+    thresholds = []
+    if rules.min_notional is not None:
+        thresholds.append(float(rules.min_notional) * max(buffer, 1.0))
+    min_amount = rules.market_min_qty if rules.market_min_qty is not None else rules.min_qty
+    if min_amount is not None and price > 0:
+        thresholds.append(float(min_amount) * price)
+    return max(thresholds) if thresholds else 0.0
+
+
+def assess_dust_holding(*, asset: str, free: float, locked: float, total: float, price: float, rules: SymbolRules, symbol: str = "") -> DustHolding | None:
+    if total <= 0:
+        return None
+    rounded_qty = round_quantity(total, rules, market_order=True)
+    min_amount = rules.market_min_qty if rules.market_min_qty is not None else rules.min_qty
+    notional = total * price
+    threshold = actionable_notional_threshold(price, rules)
+    reasons = []
+    if rounded_qty <= 0:
+        reasons.append("rounds to zero after market lot-size step")
+    elif min_amount is not None and rounded_qty < float(min_amount):
+        reasons.append(f"market qty {rounded_qty:.8f} < min qty {float(min_amount):.8f}")
+    if threshold > 0 and notional < threshold:
+        reasons.append(f"notional {notional:.8f} < actionable threshold {threshold:.8f}")
+    if not reasons:
+        return None
+    return DustHolding(
+        asset=asset,
+        free=free,
+        locked=locked,
+        total=total,
+        symbol=symbol,
+        notional=notional,
+        actionable_threshold=threshold,
+        reason="; ".join(reasons),
+    )
 
 
 def build_min_notional_warning(symbol: str, qty: float, price: float, market_rules: SymbolRules) -> str:

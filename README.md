@@ -91,6 +91,8 @@ BINANCE_READONLY_REPORT_JSON_PATH=data/market/binance_live_readonly_report.json
 This mode reads balances, account state, open orders, the selected market, and the adaptive overlay, then writes a human-readable report and JSON snapshot. It never calls submit, test, or cancel order methods.
 `BINANCE_ADAPTIVE_MODE=paper` is accepted in this mode because `BOT_MODE=live_readonly` is non-executing.
 
+Live readonly now also separates Binance dust / unactionable inventory from managed position state. If the wallet holds a tiny balance that falls below the bot's actionable sell threshold for the tracked symbol (roughly Binance min-notional with a small 5% safety buffer, plus lot-size checks), that inventory stays visible in the report/JSON under `dust_holdings` but does not count as an open managed position.
+
 ## Run Binance
 
 Default Binance wrapper:

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Literal
 from pathlib import Path
 
-from .models import AccountSnapshot, OrderState, PositionState, WalletHolding
+from .models import AccountSnapshot, DustHolding, OrderState, PositionState, WalletHolding
 
 
 @dataclass
@@ -64,7 +64,14 @@ def _coerce_account_snapshot(payload: dict | None) -> AccountSnapshot | None:
             holdings.append(row)
         elif isinstance(row, dict):
             holdings.append(WalletHolding(**row))
+    dust_holdings = []
+    for row in data.get("dust_holdings") or []:
+        if isinstance(row, DustHolding):
+            dust_holdings.append(row)
+        elif isinstance(row, dict):
+            dust_holdings.append(DustHolding(**row))
     data["holdings"] = holdings
+    data["dust_holdings"] = dust_holdings
     return AccountSnapshot(**data)
 
 

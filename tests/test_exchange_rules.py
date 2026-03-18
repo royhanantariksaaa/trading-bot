@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from app.binance.exchange import SymbolRules, validate_market_quote_budget, validate_market_sell_quantity
+from app.binance.exchange import (
+    SymbolRules,
+    actionable_notional_threshold,
+    assess_dust_holding,
+    validate_market_quote_budget,
+    validate_market_sell_quantity,
+)
 
 
 class ExchangeRulesTest(unittest.TestCase):
@@ -35,6 +41,24 @@ class ExchangeRulesTest(unittest.TestCase):
     def test_sell_quantity_rejects_below_notional(self) -> None:
         with self.assertRaises(ValueError):
             validate_market_sell_quantity(0.02, 100.0, self.rules)
+
+    def test_actionable_threshold_applies_small_buffer_over_min_notional(self) -> None:
+        self.assertEqual(actionable_notional_threshold(100.0, self.rules), 5.25)
+
+    def test_assess_dust_holding_flags_subthreshold_inventory(self) -> None:
+        dust = assess_dust_holding(
+            asset="SOL",
+            free=0.03,
+            locked=0.0,
+            total=0.03,
+            price=100.0,
+            rules=self.rules,
+            symbol="SOL/USDT",
+        )
+        self.assertIsNotNone(dust)
+        assert dust is not None
+        self.assertEqual(dust.asset, "SOL")
+        self.assertIn("actionable threshold", dust.reason)
 
 
 if __name__ == "__main__":

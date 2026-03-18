@@ -12,6 +12,18 @@ class WalletHolding:
 
 
 @dataclass
+class DustHolding:
+    asset: str
+    free: float
+    locked: float
+    total: float
+    symbol: str = ""
+    notional: float = 0.0
+    actionable_threshold: float = 0.0
+    reason: str = ""
+
+
+@dataclass
 class PositionState:
     symbol: str
     side: str
@@ -53,6 +65,7 @@ class AccountSnapshot:
     base_free: float
     base_locked: float
     holdings: list[WalletHolding] = field(default_factory=list)
+    dust_holdings: list[DustHolding] = field(default_factory=list)
     maker_fee: float | None = None
     taker_fee: float | None = None
     captured_at: str = ""

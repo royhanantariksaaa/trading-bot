@@ -3,6 +3,7 @@ from __future__ import annotations
 from .config import Config
 from .exchange import (
     SymbolRules,
+    assess_dust_holding,
     fetch_account_snapshot,
     fetch_open_orders,
     fetch_order_by_client_id,
@@ -134,8 +135,26 @@ def reconcile_live_state(config: Config, exchange, state: BotState, rules: Symbo
     state.account_snapshot = snapshot
 
     live_base_qty = snapshot.base_free + snapshot.base_locked
-    if reconstructed.qty > 0 or live_base_qty > 1e-12:
-        inferred_qty = reconstructed.qty if reconstructed.qty > 0 else live_base_qty
+    inferred_qty = reconstructed.qty if reconstructed.qty > 0 else live_base_qty
+    market_price = 0.0
+    try:
+        ticker = exchange.fetch_ticker(config.symbol)
+        market_price = float((ticker or {}).get("last") or (ticker or {}).get("close") or 0.0)
+    except Exception:
+        market_price = 0.0
+    reference_price = market_price or reconstructed.entry_price or (state.position.entry_price if state.position is not None else 0.0)
+    dust_holding = assess_dust_holding(
+        asset=rules.base_asset,
+        free=snapshot.base_free,
+        locked=snapshot.base_locked,
+        total=live_base_qty,
+        price=reference_price,
+        rules=rules,
+        symbol=config.symbol,
+    )
+    snapshot.dust_holdings = [dust_holding] if dust_holding is not None else []
+
+    if inferred_qty > 0 and dust_holding is None:
         inferred_entry = reconstructed.entry_price if reconstructed.entry_price > 0 else (state.position.entry_price if state.position is not None else 0.0)
         stop_loss = state.position.stop_loss if state.position is not None else inferred_entry * (1 - config.stop_loss_pct)
         take_profit = state.position.take_profit if state.position is not None else inferred_entry * (1 + config.take_profit_pct)

@@ -44,6 +44,14 @@ def _format_holding(asset: str, free: float, locked: float, total: float) -> str
     return f"{asset}: free={free:.6f} locked={locked:.6f} total={total:.6f}"
 
 
+def _format_dust_holding(asset: str, total: float, notional: float, actionable_threshold: float, reason: str, symbol: str = "") -> str:
+    market_text = f" via {symbol}" if symbol else ""
+    return (
+        f"{asset}: total={total:.6f} notional≈{notional:.4f} actionable_threshold≈{actionable_threshold:.4f}{market_text}"
+        f" | reason={reason}"
+    )
+
+
 @dataclass(slots=True)
 class ReadonlyReport:
     venue: str
@@ -126,7 +134,7 @@ class ReadonlyReport:
     def current_exposure_notional(self) -> float:
         if self.position is not None:
             return self.position.qty * self.live_price
-        return self.base_total * self.live_price
+        return 0.0
 
     def why_lines(self) -> tuple[str, ...]:
         lines = [self.summary()]
@@ -144,7 +152,10 @@ class ReadonlyReport:
                 f"Base free / locked: `{self.base_free:.6f}` / `{self.base_locked:.6f}` {self.account_snapshot.base_asset}"
             )
             lines.append(
-                f"Current exposure: `{self.base_total:.6f} {self.account_snapshot.base_asset}` (~`{self.current_exposure_notional:.4f} {self.account_snapshot.quote_asset}` at live price)"
+                f"Wallet base inventory: `{self.base_total:.6f} {self.account_snapshot.base_asset}`"
+            )
+            lines.append(
+                f"Managed exposure: `~{self.current_exposure_notional:.4f} {self.account_snapshot.quote_asset}` at live price"
             )
             if self.account_snapshot.maker_fee is not None or self.account_snapshot.taker_fee is not None:
                 lines.append(
@@ -162,6 +173,15 @@ class ReadonlyReport:
                     lines.append(f"- {_format_holding(item.asset, item.free, item.locked, item.total)}")
                 if len(ordered) > 12:
                     lines.append(f"- ... {len(ordered) - 12} more assets")
+            dust_holdings = self.account_snapshot.dust_holdings or []
+            if dust_holdings:
+                lines.append("Dust / unactionable inventory:")
+                for item in dust_holdings:
+                    lines.append(
+                        f"- {_format_dust_holding(item.asset, item.total, item.notional, item.actionable_threshold, item.reason, item.symbol)}"
+                    )
+                if self.position is None:
+                    lines.append("- Managed position state stays flat; dust is visible but excluded from tradable exposure logic.")
 
         if self.open_orders:
             lines.append("Open orders:")

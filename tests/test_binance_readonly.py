@@ -7,7 +7,7 @@ from pathlib import Path
 from app.binance.adaptive import AdaptiveDecisionReport, RecentHistorySnapshot
 from app.binance.config import Config as BinanceConfig
 from app.binance.main import _adaptive_runtime_allows
-from app.binance.models import AccountSnapshot, WalletHolding
+from app.binance.models import AccountSnapshot, DustHolding, WalletHolding
 from app.binance.readonly_report import build_live_readonly_report, write_live_readonly_report
 from app.binance.exchange import SymbolRules
 from app.binance.state import BotState
@@ -136,6 +136,18 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
                 WalletHolding(asset="USDT", free=180.0, locked=0.0, total=180.0),
                 WalletHolding(asset="SOL", free=1.2, locked=0.0, total=1.2),
             ],
+            dust_holdings=[
+                DustHolding(
+                    asset="XRP",
+                    free=2.0,
+                    locked=0.0,
+                    total=2.0,
+                    symbol="XRP/USDT",
+                    notional=1.1,
+                    actionable_threshold=5.25,
+                    reason="notional 1.10000000 < actionable threshold 5.25000000",
+                )
+            ],
             maker_fee=0.001,
             taker_fee=0.001,
             captured_at="2026-03-18T00:00:00+00:00",
@@ -197,12 +209,15 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
         self.assertIn("Live read-only guard", text)
         self.assertIn("Selected candidate", text)
         self.assertIn("Adaptive overlay", text)
+        self.assertIn("Dust / unactionable inventory", text)
+        self.assertIn("XRP: total=2.000000", text)
         self.assertIn("Proposed action: `BUY`", text)
         self.assertIn("Entry plan:", text)
         self.assertEqual(payload["decision_action"], "BUY")
         self.assertEqual(payload["blocked_by"], "live_readonly (no submit/test/cancel)")
         self.assertEqual(payload["selection"]["symbol"], "SOL/USDT")
         self.assertEqual(payload["adaptive_report"]["selected_profile"]["name"], adaptive_profile.name)
+        self.assertEqual(payload["account_snapshot"]["dust_holdings"][0]["asset"], "XRP")
 
 
 if __name__ == "__main__":

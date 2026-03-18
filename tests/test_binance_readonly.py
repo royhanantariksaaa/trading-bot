@@ -239,6 +239,40 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
                         "rsi_sell_ok": False,
                     },
                     estimated_notional=181.2,
+                ),
+                HoldingSignalSnapshot(
+                    asset="ADA",
+                    symbol="ADA/USDT",
+                    total=30.0,
+                    free=30.0,
+                    locked=0.0,
+                    tradable=True,
+                    signal="sell",
+                    action="REVIEW SELL",
+                    reason="sell setup detected on owned asset",
+                    signal_price=1.1,
+                    live_price=1.08,
+                    ema_fast=1.09,
+                    ema_slow=1.10,
+                    rsi=43.0,
+                    htf_text="4h_rsi=48.0",
+                    htf_ok=False,
+                    gates={
+                        "crossed_up": False,
+                        "crossed_down": True,
+                        "rsi_buy_ok": False,
+                        "rsi_sell_ok": True,
+                    },
+                    estimated_notional=32.4,
+                ),
+                HoldingSignalSnapshot(
+                    asset="LDUSDC",
+                    symbol="LDUSDC/USDT",
+                    total=5.0,
+                    free=5.0,
+                    locked=0.0,
+                    tradable=False,
+                    note="no active spot market found for holding against quote asset",
                 )
             ],
         )
@@ -298,6 +332,10 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
         self.assertIn("EMA:", compact)
         self.assertIn("Exposure:", compact)
         self.assertIn("Owned assets:", compact)
+        self.assertIn("Owned signals:", compact)
+        self.assertIn("ADA=REVIEW SELL", compact)
+        self.assertIn("SOL=WATCH BUY", compact)
+        self.assertIn("LDUSDC=BLOCKED", compact)
         self.assertNotIn("Adaptive summary:", compact)
         self.assertNotIn("Reports:", compact)
 

@@ -618,6 +618,31 @@ def readonly_decision_summary_key(report: ReadonlyReport) -> str:
     )
 
 
+def _holding_action_rank(action: str) -> int:
+    order = {
+        "REVIEW SELL": 0,
+        "WATCH BUY": 1,
+        "WAIT": 2,
+        "HOLD": 3,
+    }
+    return order.get(action, 9)
+
+
+def _top_owned_signal_line(report: ReadonlyReport, *, limit: int = 3) -> str:
+    if not report.holding_signals:
+        return ""
+    ranked = sorted(
+        report.holding_signals,
+        key=lambda row: (_holding_action_rank(row.action), -(row.estimated_notional or 0.0), row.asset),
+    )
+    top = ranked[:limit]
+    parts = []
+    for row in top:
+        status = row.action if row.tradable else "BLOCKED"
+        parts.append(f"{row.asset}={status}")
+    return " | ".join(parts)
+
+
 def format_live_readonly_notification(
     report: ReadonlyReport,
     *,
@@ -664,6 +689,9 @@ def format_live_readonly_notification(
             lines.append(
                 f"Owned assets: wallet_only=`{wallet_only_assets}` tradable=`{tradable_holdings}` blocked=`{blocked_holdings}` dust=`{dust_assets}`"
             )
+        owned_signal_line = _top_owned_signal_line(report)
+        if owned_signal_line:
+            lines.append(f"Owned signals: `{owned_signal_line}`")
         if report.sell_reason:
             lines.append(f"Exit trigger: `{_compact_text(report.sell_reason, limit=180)}`")
         if report.entry_plan is not None:

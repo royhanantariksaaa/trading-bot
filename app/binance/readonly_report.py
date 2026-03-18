@@ -47,9 +47,19 @@ def _format_holding(asset: str, free: float, locked: float, total: float) -> str
 def _format_dust_holding(asset: str, total: float, notional: float, actionable_threshold: float, reason: str, symbol: str = "") -> str:
     market_text = f" via {symbol}" if symbol else ""
     return (
-        f"{asset}: total={total:.6f} notional≈{notional:.4f} actionable_threshold≈{actionable_threshold:.4f}{market_text}"
+        f"{asset}: action=CANNOT ACT total={total:.6f} notional≈{notional:.4f} actionable_threshold≈{actionable_threshold:.4f}{market_text}"
         f" | reason={reason}"
     )
+
+
+def _format_owned_asset(asset: str, total: float, action: str, reason: str, *, notional: float | None = None, symbol: str = "") -> str:
+    parts = [f"{asset}: action={action}", f"total={total:.6f}"]
+    if notional is not None:
+        parts.append(f"notional≈{notional:.4f}")
+    if symbol:
+        parts.append(f"symbol={symbol}")
+    parts.append(f"reason={reason}")
+    return " | ".join(parts)
 
 
 @dataclass(slots=True)
@@ -163,8 +173,37 @@ class ReadonlyReport:
                     f"taker=`{_format_float(self.account_snapshot.taker_fee, precision=6)}`"
                 )
             holdings = self.account_snapshot.holdings or []
+            dust_holdings = self.account_snapshot.dust_holdings or []
+            dust_assets = {item.asset for item in dust_holdings}
+            if self.position is not None:
+                lines.append("Managed positions:")
+                lines.append(
+                    f"- {_format_owned_asset(self.account_snapshot.base_asset, self.position.qty, 'HOLD' if not self.sell_reason else self.decision_action, self.decision_reason or 'managed by bot state', notional=self.current_exposure_notional, symbol=self.position.symbol)}"
+                )
+            wallet_only = [
+                item
+                for item in holdings
+                if item.asset not in {self.account_snapshot.quote_asset}
+                and item.asset not in dust_assets
+                and not (self.position is not None and item.asset == self.account_snapshot.base_asset)
+            ]
+            if wallet_only:
+                lines.append("Wallet-only holdings:")
+                ordered_wallet = sorted(wallet_only, key=lambda row: (-row.total, row.asset))
+                for item in ordered_wallet[:12]:
+                    notional = item.total * self.live_price if item.asset == self.account_snapshot.base_asset else None
+                    reason = (
+                        "selected symbol held in wallet but not tracked as a managed bot position"
+                        if item.asset == self.account_snapshot.base_asset
+                        else "wallet holding outside current managed symbol scope"
+                    )
+                    action = "HOLD" if item.asset == self.account_snapshot.base_asset else "IGNORE"
+                    symbol = self.symbol if item.asset == self.account_snapshot.base_asset else ""
+                    lines.append(f"- {_format_owned_asset(item.asset, item.total, action, reason, notional=notional, symbol=symbol)}")
+                if len(ordered_wallet) > 12:
+                    lines.append(f"- ... {len(ordered_wallet) - 12} more assets")
             if holdings:
-                lines.append("Holdings:")
+                lines.append("Raw holdings:")
                 ordered = sorted(
                     holdings,
                     key=lambda row: (0 if row.asset in {self.account_snapshot.quote_asset, self.account_snapshot.base_asset} else 1, -row.total, row.asset),
@@ -173,7 +212,6 @@ class ReadonlyReport:
                     lines.append(f"- {_format_holding(item.asset, item.free, item.locked, item.total)}")
                 if len(ordered) > 12:
                     lines.append(f"- ... {len(ordered) - 12} more assets")
-            dust_holdings = self.account_snapshot.dust_holdings or []
             if dust_holdings:
                 lines.append("Dust / unactionable inventory:")
                 for item in dust_holdings:
@@ -564,6 +602,16 @@ def format_live_readonly_notification(
         elif report.selection_note:
             lines.append(f"Selected market: `{_compact_text(report.selection_note, limit=220)}`")
     if compact:
+        if report.account_snapshot is not None:
+            dust_assets = len(report.account_snapshot.dust_holdings or [])
+            wallet_only_assets = sum(
+                1
+                for item in (report.account_snapshot.holdings or [])
+                if item.asset not in {report.account_snapshot.quote_asset}
+                and item.asset not in {dust.asset for dust in (report.account_snapshot.dust_holdings or [])}
+                and not (report.position is not None and item.asset == report.account_snapshot.base_asset)
+            )
+            lines.append(f"Owned assets: wallet_only=`{wallet_only_assets}` dust=`{dust_assets}`")
         if report.sell_reason:
             lines.append(f"Exit trigger: `{_compact_text(report.sell_reason, limit=180)}`")
         if report.entry_plan is not None:

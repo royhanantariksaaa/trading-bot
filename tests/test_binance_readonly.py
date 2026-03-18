@@ -333,9 +333,12 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
         self.assertIn("Exposure:", compact)
         self.assertIn("Owned assets:", compact)
         self.assertIn("Owned signals:", compact)
+        self.assertIn("Owned setups:", compact)
+        self.assertIn("Plan:", compact)
         self.assertIn("ADA=REVIEW SELL", compact)
         self.assertIn("SOL=WATCH BUY", compact)
         self.assertIn("LDUSDC=BLOCKED", compact)
+        self.assertIn("SOL=buy_above:", compact)
         self.assertNotIn("Adaptive summary:", compact)
         self.assertNotIn("Reports:", compact)
 

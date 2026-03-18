@@ -643,6 +643,52 @@ def _top_owned_signal_line(report: ReadonlyReport, *, limit: int = 3) -> str:
     return " | ".join(parts)
 
 
+def _owned_signal_preview_line(report: ReadonlyReport, *, limit: int = 3) -> str:
+    if not report.holding_signals:
+        return ""
+    ranked = sorted(
+        report.holding_signals,
+        key=lambda row: (_holding_action_rank(row.action), -(row.estimated_notional or 0.0), row.asset),
+    )
+    parts: list[str] = []
+    for row in ranked[:limit]:
+        if not row.tradable:
+            parts.append(f"{row.asset}=BLOCKED")
+            continue
+        if row.action == "WATCH BUY":
+            parts.append(
+                f"{row.asset}=buy_above:{row.signal_price:.4f} sl:n/a tp:n/a"
+            )
+        elif row.action == "REVIEW SELL":
+            parts.append(
+                f"{row.asset}=sell_watch:{row.live_price:.4f} reason:{_compact_text(row.reason or 'sell review', limit=40)}"
+            )
+        elif row.action == "HOLD":
+            parts.append(f"{row.asset}=hold@{row.live_price:.4f}")
+        else:
+            parts.append(f"{row.asset}={row.action.lower()}@{row.live_price:.4f}")
+    return " | ".join(parts)
+
+
+def _decision_preview_line(report: ReadonlyReport) -> str:
+    if report.entry_plan is not None:
+        return (
+            f"buy_above=`{report.signal_price:.4f}` | "
+            f"sl=`{report.entry_plan.stop_loss:.4f}` | "
+            f"tp=`{report.entry_plan.take_profit:.4f}` | "
+            f"size=`{report.entry_plan.quote_budget:.4f}`"
+        )
+    if report.exit_plan is not None:
+        return f"sell_qty=`{report.exit_plan.qty:.6f}`"
+    if report.position is not None:
+        return (
+            f"hold_entry=`{report.position.entry_price:.4f}` | "
+            f"sl=`{report.position.stop_loss:.4f}` | "
+            f"tp=`{report.position.take_profit:.4f}`"
+        )
+    return ""
+
+
 def format_live_readonly_notification(
     report: ReadonlyReport,
     *,
@@ -692,6 +738,12 @@ def format_live_readonly_notification(
         owned_signal_line = _top_owned_signal_line(report)
         if owned_signal_line:
             lines.append(f"Owned signals: `{owned_signal_line}`")
+        owned_preview_line = _owned_signal_preview_line(report)
+        if owned_preview_line:
+            lines.append(f"Owned setups: `{owned_preview_line}`")
+        decision_preview_line = _decision_preview_line(report)
+        if decision_preview_line:
+            lines.append(f"Plan: `{decision_preview_line}`")
         if report.sell_reason:
             lines.append(f"Exit trigger: `{_compact_text(report.sell_reason, limit=180)}`")
         if report.entry_plan is not None:

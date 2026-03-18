@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import csv
 import json
-import math
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from ..selection.runtime import maybe_rotate_runtime_selection
+from .adaptive import evaluate_adaptive_policy
 from .config import Config
 from .models import BotState, BookSnapshot, FillResult, QuotePlan, utc_now
 
@@ -62,6 +63,34 @@ def append_run_log(path: Path, row: dict) -> None:
 
 def mark_to_market(state: BotState, mid: float) -> float:
     return state.cash + state.inventory * mid
+
+
+def adaptive_runtime_allows(config: Config) -> bool:
+    if config.adaptive_mode == "off":
+        return False
+    if config.adaptive_mode == "paper" and not config.paper_mode:
+        return False
+    return True
+
+
+def resolve_runtime_config(config: Config, book: BookSnapshot, state: BotState, client) -> tuple[Config, object | None]:
+    if not adaptive_runtime_allows(config):
+        return config, None
+    try:
+        metadata = client.get_market_metadata(config.token_id)
+    except Exception:
+        metadata = {}
+    report = evaluate_adaptive_policy(config, book, previous_mid=state.last_mid if state.loops > 0 else None, metadata=metadata)
+    runtime_config = replace(
+        config,
+        base_spread=report.overrides.base_spread,
+        edge_offset=report.overrides.edge_offset,
+        quote_size=report.overrides.quote_size,
+        max_inventory=report.overrides.max_inventory,
+        max_position_notional=report.overrides.max_position_notional,
+        inventory_skew_per_share=report.overrides.inventory_skew_per_share,
+    )
+    return runtime_config, report
 
 
 def compute_quote_plan(config: Config, state: BotState, book: BookSnapshot) -> QuotePlan:
@@ -158,8 +187,9 @@ def run_loop(config: Config, client) -> None:
             rotation.mark_executed(state.loops)
 
         book = client.get_book(config.token_id)
+        runtime_config, adaptive_report = resolve_runtime_config(config, book, state, client)
         state.last_mid = book.midpoint
-        plan = compute_quote_plan(config, state, book)
+        plan = compute_quote_plan(runtime_config, state, book)
         fills = maybe_fill_quotes(state, book, plan) if config.paper_mode else []
         for fill in fills:
             apply_fill(state, fill)
@@ -167,6 +197,9 @@ def run_loop(config: Config, client) -> None:
         state.loops += 1
         state.updated_at = utc_now()
         save_state(config.state_path, state)
+        note = plan.reason
+        if adaptive_report is not None:
+            note = f"{note}; adaptive={adaptive_report.policy_name}; report={adaptive_report.report_path}"
         append_run_log(
             config.log_path,
             {
@@ -184,13 +217,14 @@ def run_loop(config: Config, client) -> None:
                 "buy_size": f"{plan.buy_size:.2f}",
                 "sell_size": f"{plan.sell_size:.2f}",
                 "fills": "; ".join(f"{fill.side}@{fill.price:.4f}x{fill.size:.2f}" for fill in fills) or "none",
-                "notes": plan.reason,
+                "notes": note,
             },
         )
 
-        print(
-            f"loop={state.loops} mid={book.midpoint:.4f} bid={plan.bid_price:.4f} ask={plan.ask_price:.4f} inv={state.inventory:.2f} mtm={mark_to_market(state, book.midpoint):.4f} fills={len(fills)}"
-        )
+        status = f"loop={state.loops} mid={book.midpoint:.4f} bid={plan.bid_price:.4f} ask={plan.ask_price:.4f} inv={state.inventory:.2f} mtm={mark_to_market(state, book.midpoint):.4f} fills={len(fills)}"
+        if adaptive_report is not None:
+            status = f"{status} adaptive={adaptive_report.policy_name}"
+        print(status)
 
         if remaining > 0:
             remaining -= 1

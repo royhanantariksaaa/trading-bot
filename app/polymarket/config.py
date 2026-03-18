@@ -24,6 +24,7 @@ class Config:
     poll_seconds: int = int(os.getenv("PM_POLL_SECONDS", "5"))
     loops: int = int(os.getenv("PM_LOOPS", "0"))
     paper_mode: bool = env_bool(os.getenv("PM_PAPER_MODE"), True)
+    adaptive_mode: str = os.getenv("PM_ADAPTIVE_MODE", "off").strip().lower()
     selection_mode: str = os.getenv("PM_SELECTION_MODE", "manual").strip().lower()
     selection_csv_path: Path = field(
         default_factory=lambda: resolve_project_path(os.getenv("PM_SELECTION_CSV", str(default_selection_csv_path("polymarket"))))
@@ -32,10 +33,15 @@ class Config:
     selection_rotation_only_when_flat: bool = env_bool(os.getenv("PM_SELECTION_ROTATE_ONLY_WHEN_FLAT"), True)
     state_path: Path = field(default_factory=polymarket_state_path)
     log_path: Path = field(default_factory=polymarket_log_path)
+    adaptive_report_path: Path = field(
+        default_factory=lambda: resolve_project_path(os.getenv("PM_ADAPTIVE_REPORT_PATH", "data/market/polymarket_adaptive_report.txt"))
+    )
 
     def validate(self) -> None:
         if not self.token_id:
             raise ValueError("POLYMARKET_TOKEN_ID is required")
+        if self.adaptive_mode not in {"off", "paper", "on"}:
+            raise ValueError("PM_ADAPTIVE_MODE must be 'off', 'paper', or 'on'")
         if self.selection_mode not in {"manual", "csv", "scan"}:
             raise ValueError("PM_SELECTION_MODE must be 'manual', 'csv', or 'scan'")
         if self.selection_rotation_loops < 0:

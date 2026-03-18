@@ -11,6 +11,7 @@ from app.binance.models import AccountSnapshot, DustHolding, WalletHolding
 from app.binance.readonly_report import (
     build_live_readonly_report,
     format_live_readonly_notification,
+    readonly_decision_summary_key,
     readonly_notification_key,
     write_live_readonly_report,
 )
@@ -56,6 +57,24 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
     def test_adaptive_runtime_allows_paper_overlay_in_live_readonly(self) -> None:
         config = self._make_config()
         self.assertTrue(_adaptive_runtime_allows(config))
+
+    def _make_symbol_rules(self) -> SymbolRules:
+        return SymbolRules(
+            symbol="SOL/USDT",
+            base_asset="SOL",
+            quote_asset="USDT",
+            min_qty=0.01,
+            max_qty=10_000,
+            qty_step=0.01,
+            market_min_qty=0.01,
+            market_max_qty=10_000,
+            market_qty_step=0.01,
+            min_price=0.01,
+            max_price=100_000,
+            tick_size=0.01,
+            min_notional=5.0,
+            max_notional=100_000.0,
+        )
 
     def test_live_readonly_report_writes_text_and_json(self) -> None:
         config = self._make_config()
@@ -158,22 +177,7 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
             captured_at="2026-03-18T00:00:00+00:00",
         )
         state = BotState(account_snapshot=snapshot)
-        market_rules = SymbolRules(
-            symbol="SOL/USDT",
-            base_asset="SOL",
-            quote_asset="USDT",
-            min_qty=0.01,
-            max_qty=10_000,
-            qty_step=0.01,
-            market_min_qty=0.01,
-            market_max_qty=10_000,
-            market_qty_step=0.01,
-            min_price=0.01,
-            max_price=100_000,
-            tick_size=0.01,
-            min_notional=5.0,
-            max_notional=100_000.0,
-        )
+        market_rules = self._make_symbol_rules()
         report = build_live_readonly_report(
             config=config,
             state=state,
@@ -260,6 +264,83 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
         report.adaptive_note = "adaptive overlay fallback changed"
         report.adaptive_report = None
         self.assertNotEqual(changed_key, readonly_notification_key(report))
+
+    def test_decision_summary_key_tracks_snapshot_changes_that_notification_key_misses(self) -> None:
+        config = self._make_config()
+        state = BotState()
+        report = build_live_readonly_report(
+            config=config,
+            state=state,
+            market_rules=self._make_symbol_rules(),
+            signal="hold",
+            signal_price=150.0,
+            live_price=151.0,
+            ema_fast=149.2,
+            ema_slow=148.4,
+            rsi=49.0,
+            gates={
+                "crossed_up": False,
+                "crossed_down": False,
+                "rsi_buy_ok": False,
+                "rsi_sell_ok": False,
+                "buy_ready": False,
+                "sell_ready": False,
+            },
+            htf_text="htf=off",
+            htf_ok=True,
+            available_quote=180.0,
+            candle_time="2026-03-18T00:15:00+00:00",
+        )
+
+        coarse_key = readonly_notification_key(report)
+        summary_key = readonly_decision_summary_key(report)
+
+        report.live_price = 151.75
+        report.signal_price = 150.5
+        report.ema_fast = 149.55
+        report.ema_slow = 148.95
+        report.rsi = 51.23
+        report.available_quote = 179.5
+
+        self.assertEqual(coarse_key, readonly_notification_key(report))
+        self.assertNotEqual(summary_key, readonly_decision_summary_key(report))
+
+    def test_decision_summary_key_ignores_micro_noise_within_rounding_bucket(self) -> None:
+        config = self._make_config()
+        state = BotState()
+        report = build_live_readonly_report(
+            config=config,
+            state=state,
+            market_rules=self._make_symbol_rules(),
+            signal="hold",
+            signal_price=150.0,
+            live_price=151.0,
+            ema_fast=149.2,
+            ema_slow=148.4,
+            rsi=49.0,
+            gates={
+                "crossed_up": False,
+                "crossed_down": False,
+                "rsi_buy_ok": False,
+                "rsi_sell_ok": False,
+                "buy_ready": False,
+                "sell_ready": False,
+            },
+            htf_text="htf=off",
+            htf_ok=True,
+            available_quote=180.0,
+            candle_time="2026-03-18T00:15:00+00:00",
+        )
+
+        summary_key = readonly_decision_summary_key(report)
+        report.live_price = 151.00004
+        report.signal_price = 150.00004
+        report.ema_fast = 149.20004
+        report.ema_slow = 148.40004
+        report.rsi = 49.004
+        report.available_quote = 180.004
+
+        self.assertEqual(summary_key, readonly_decision_summary_key(report))
 
 
 if __name__ == "__main__":

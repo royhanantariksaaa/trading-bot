@@ -440,13 +440,35 @@ def _compact_text(value: str, *, limit: int = 160) -> str:
     return collapsed[: max(0, limit - 1)].rstrip() + "…"
 
 
+def _position_state(report: ReadonlyReport, *, price_precision: int = 4) -> str:
+    if report.position is None:
+        return "flat"
+    return (
+        f"long:{report.position.qty:.6f}:{report.position.entry_price:.{price_precision}f}:"
+        f"{report.position.stop_loss:.{price_precision}f}:{report.position.take_profit:.{price_precision}f}"
+    )
+
+
+def _entry_state(report: ReadonlyReport, *, price_precision: int = 4) -> str:
+    if report.entry_plan is None:
+        return ""
+    return (
+        f"entry:{int(report.entry_plan.allowed)}:{report.entry_plan.quote_budget:.4f}:"
+        f"{report.entry_plan.estimated_qty:.6f}:{report.entry_plan.stop_loss:.{price_precision}f}:"
+        f"{report.entry_plan.take_profit:.{price_precision}f}:{_compact_text(report.entry_plan.reason, limit=120)}"
+    )
+
+
+def _exit_state(report: ReadonlyReport) -> str:
+    if report.exit_plan is None:
+        return ""
+    return (
+        f"exit:{int(report.exit_plan.allowed)}:{report.exit_plan.qty:.6f}:"
+        f"{_compact_text(report.exit_plan.reason, limit=120)}"
+    )
+
+
 def readonly_notification_key(report: ReadonlyReport) -> str:
-    position_state = "flat"
-    if report.position is not None:
-        position_state = (
-            f"long:{report.position.qty:.6f}:{report.position.entry_price:.4f}:"
-            f"{report.position.stop_loss:.4f}:{report.position.take_profit:.4f}"
-        )
     selection_state = ""
     if report.selection is not None:
         selection_state = _compact_text(report.selection.summary, limit=200)
@@ -457,19 +479,6 @@ def readonly_notification_key(report: ReadonlyReport) -> str:
         adaptive_state = _compact_text(report.adaptive_report.summary(), limit=200)
     elif report.adaptive_note:
         adaptive_state = _compact_text(report.adaptive_note, limit=200)
-    entry_state = ""
-    if report.entry_plan is not None:
-        entry_state = (
-            f"entry:{int(report.entry_plan.allowed)}:{report.entry_plan.quote_budget:.4f}:"
-            f"{report.entry_plan.estimated_qty:.6f}:{report.entry_plan.stop_loss:.4f}:"
-            f"{report.entry_plan.take_profit:.4f}:{_compact_text(report.entry_plan.reason, limit=120)}"
-        )
-    exit_state = ""
-    if report.exit_plan is not None:
-        exit_state = (
-            f"exit:{int(report.exit_plan.allowed)}:{report.exit_plan.qty:.6f}:"
-            f"{_compact_text(report.exit_plan.reason, limit=120)}"
-        )
     reasons_state = " || ".join(_compact_text(reason, limit=120) for reason in report.decision_reasons[:3])
     open_orders_state = ",".join(
         f"{order.side}:{order.order_type}:{order.status}:{order.qty:.6f}:{order.stop_price:.4f}"
@@ -484,13 +493,41 @@ def readonly_notification_key(report: ReadonlyReport) -> str:
             _compact_text(report.decision_reason, limit=200),
             reasons_state,
             "1" if report.htf_ok else "0",
-            position_state,
+            _position_state(report),
             report.sell_reason,
             selection_state,
             adaptive_state,
-            entry_state,
-            exit_state,
+            _entry_state(report),
+            _exit_state(report),
             open_orders_state,
+        ]
+    )
+
+
+def readonly_decision_summary_key(report: ReadonlyReport) -> str:
+    gate_state = ",".join(
+        f"{name}={int(bool(report.gates.get(name, False)))}"
+        for name in ("crossed_up", "crossed_down", "rsi_buy_ok", "rsi_sell_ok", "buy_ready", "sell_ready")
+    )
+    return "|".join(
+        [
+            report.symbol,
+            report.timeframe,
+            report.signal or "hold",
+            report.decision_action,
+            _compact_text(report.decision_reason, limit=200),
+            f"live={report.live_price:.4f}",
+            f"signal_price={report.signal_price:.4f}",
+            f"ema_fast={report.ema_fast:.4f}",
+            f"ema_slow={report.ema_slow:.4f}",
+            f"rsi={report.rsi:.2f}",
+            f"quote={report.available_quote:.2f}",
+            "1" if report.htf_ok else "0",
+            gate_state,
+            _position_state(report),
+            _entry_state(report),
+            _exit_state(report),
+            _compact_text(report.sell_reason, limit=120),
         ]
     )
 

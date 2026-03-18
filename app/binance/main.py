@@ -18,6 +18,7 @@ from .paper_wallet import PaperWallet
 from .readonly_report import (
     build_live_readonly_report,
     format_live_readonly_notification,
+    readonly_decision_summary_key,
     readonly_notification_key,
     render_live_readonly_report,
     write_live_readonly_report,
@@ -289,8 +290,10 @@ def run_bot(config: Config) -> None:
         save_state(state_path, state)
 
     readonly_last_notification_key = ""
+    readonly_last_decision_summary_key = ""
     readonly_last_notification_loop = -1
     readonly_notification_interval_loops = max(1, int(3600 / max(config.poll_seconds, 1)))
+    readonly_decision_summary_interval_loops = max(1, int(600 / max(config.poll_seconds, 1)))
 
     if config.live_readonly_mode:
         startup = format_readonly_startup_message(
@@ -508,12 +511,19 @@ def run_bot(config: Config) -> None:
                 )
                 print(render_live_readonly_report(readonly_report), end="", flush=True)
                 notification_key = readonly_notification_key(readonly_report)
+                decision_summary_key = readonly_decision_summary_key(readonly_report)
                 key_changed = notification_key != readonly_last_notification_key
                 heartbeat_due = (
                     readonly_last_notification_loop < 0
                     or (loops - readonly_last_notification_loop) >= readonly_notification_interval_loops
                 )
-                should_send_readonly = key_changed or heartbeat_due
+                decision_summary_changed = decision_summary_key != readonly_last_decision_summary_key
+                decision_summary_due = (
+                    readonly_last_notification_loop >= 0
+                    and (loops - readonly_last_notification_loop) >= readonly_decision_summary_interval_loops
+                )
+                summary_refresh_due = decision_summary_changed and decision_summary_due and not key_changed
+                should_send_readonly = key_changed or summary_refresh_due or heartbeat_due
                 if should_send_readonly:
                     send_status(
                         notifier,
@@ -521,10 +531,11 @@ def run_bot(config: Config) -> None:
                             readonly_report,
                             include_selection=key_changed or heartbeat_due,
                             include_adaptive=key_changed or heartbeat_due,
-                            reminder=heartbeat_due and not key_changed and readonly_last_notification_loop >= 0,
+                            reminder=heartbeat_due and not key_changed and not summary_refresh_due and readonly_last_notification_loop >= 0,
                         ),
                     )
                     readonly_last_notification_key = notification_key
+                    readonly_last_decision_summary_key = decision_summary_key
                     readonly_last_notification_loop = loops
                 loops += 1
                 state.last_processed_candle_time = candle_time

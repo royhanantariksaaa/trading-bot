@@ -15,6 +15,9 @@ class Config:
     token_id: str = os.getenv("POLYMARKET_TOKEN_ID", "")
     min_order_size: float = float(os.getenv("PM_MIN_ORDER_SIZE", "5"))
     quote_size: float = float(os.getenv("PM_QUOTE_SIZE", "25"))
+    starting_cash: float = float(os.getenv("PM_STARTING_CASH", "100"))
+    reserve_cash: float = float(os.getenv("PM_RESERVE_CASH", "25"))
+    max_drawdown_pct: float = float(os.getenv("PM_MAX_DRAWDOWN_PCT", "0.15"))
     base_spread: float = float(os.getenv("PM_BASE_SPREAD", "0.04"))
     edge_offset: float = float(os.getenv("PM_EDGE_OFFSET", "0.01"))
     inventory_target: float = float(os.getenv("PM_INVENTORY_TARGET", "0"))
@@ -48,6 +51,14 @@ class Config:
             raise ValueError("PM_SELECTION_ROTATE_EVERY_LOOPS must be >= 0")
         if self.quote_size <= 0:
             raise ValueError("PM_QUOTE_SIZE must be > 0")
+        if self.starting_cash <= 0:
+            raise ValueError("PM_STARTING_CASH must be > 0")
+        if self.reserve_cash < 0:
+            raise ValueError("PM_RESERVE_CASH must be >= 0")
+        if self.reserve_cash >= self.starting_cash:
+            raise ValueError("PM_RESERVE_CASH must be less than PM_STARTING_CASH")
+        if self.max_drawdown_pct < 0 or self.max_drawdown_pct >= 1:
+            raise ValueError("PM_MAX_DRAWDOWN_PCT must be in [0, 1)")
         if self.base_spread <= 0 or self.base_spread >= 1:
             raise ValueError("PM_BASE_SPREAD must be between 0 and 1")
         if self.edge_offset < 0 or self.edge_offset >= 1:

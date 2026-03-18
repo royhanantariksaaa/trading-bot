@@ -65,6 +65,40 @@ def mark_to_market(state: BotState, mid: float) -> float:
     return state.cash + state.inventory * mid
 
 
+def budget_floor_reached(config: Config, state: BotState, mid: float) -> bool:
+    return mark_to_market(state, mid) <= config.reserve_cash
+
+
+def drawdown_pct(state: BotState, mid: float) -> float:
+    equity = mark_to_market(state, mid)
+    if state.peak_mark_to_market <= 0:
+        return 0.0
+    return max(0.0, (state.peak_mark_to_market - equity) / state.peak_mark_to_market)
+
+
+def update_budget_state(config: Config, state: BotState, mid: float) -> str | None:
+    equity = mark_to_market(state, mid)
+    if state.peak_mark_to_market <= 0:
+        state.peak_mark_to_market = max(config.starting_cash, equity)
+    else:
+        state.peak_mark_to_market = max(state.peak_mark_to_market, equity)
+
+    if budget_floor_reached(config, state, mid):
+        state.halted = True
+        state.halt_reason = f"budget floor reached: equity={equity:.4f} reserve={config.reserve_cash:.4f}"
+        return state.halt_reason
+
+    current_drawdown = drawdown_pct(state, mid)
+    if current_drawdown >= config.max_drawdown_pct:
+        state.halted = True
+        state.halt_reason = f"max drawdown reached: drawdown={current_drawdown:.2%} limit={config.max_drawdown_pct:.2%}"
+        return state.halt_reason
+
+    state.halted = False
+    state.halt_reason = ""
+    return None
+
+
 def adaptive_runtime_allows(config: Config) -> bool:
     if config.adaptive_mode == "off":
         return False
@@ -107,13 +141,28 @@ def compute_quote_plan(config: Config, state: BotState, book: BookSnapshot) -> Q
     buy_size = 0.0 if state.inventory >= config.max_inventory else max(config.min_order_size, config.quote_size)
     sell_size = 0.0 if state.inventory <= -config.max_inventory else max(config.min_order_size, config.quote_size)
 
+    current_equity = mark_to_market(state, book.midpoint)
+    spendable_cash = max(0.0, state.cash - config.reserve_cash)
+    if spendable_cash <= 0:
+        buy_size = 0.0
+    else:
+        buy_size = min(buy_size, spendable_cash / max(book.best_ask, book.tick_size))
+        if buy_size < config.min_order_size:
+            buy_size = 0.0
+
     if state.inventory * book.midpoint >= config.max_position_notional:
         buy_size = 0.0
     if abs(state.inventory) * book.midpoint >= config.max_position_notional and state.inventory <= 0:
         sell_size = 0.0
+    if current_equity <= config.reserve_cash or state.halted:
+        buy_size = 0.0
 
     reason = "inventory-balanced"
-    if inventory_gap > 0:
+    if state.halted:
+        reason = f"halted:{state.halt_reason}"
+    elif current_equity <= config.reserve_cash:
+        reason = "budget-floor-protect"
+    elif inventory_gap > 0:
         reason = "long-inventory-skew"
     elif inventory_gap < 0:
         reason = "short-inventory-skew"
@@ -164,6 +213,11 @@ def _can_rotate_market(config: Config, state: BotState) -> tuple[bool, str]:
 def run_loop(config: Config, client) -> None:
     config.validate()
     state = load_state(config.state_path)
+    if state.loops == 0 and state.cash == 0 and state.inventory == 0:
+        state.cash = config.starting_cash
+        state.peak_mark_to_market = config.starting_cash
+    elif state.peak_mark_to_market <= 0:
+        state.peak_mark_to_market = max(config.starting_cash, mark_to_market(state, state.last_mid))
     rotation = config.rotation_controller
 
     remaining = config.loops
@@ -189,6 +243,7 @@ def run_loop(config: Config, client) -> None:
         book = client.get_book(config.token_id)
         runtime_config, adaptive_report = resolve_runtime_config(config, book, state, client)
         state.last_mid = book.midpoint
+        budget_note = update_budget_state(config, state, book.midpoint)
         plan = compute_quote_plan(runtime_config, state, book)
         fills = maybe_fill_quotes(state, book, plan) if config.paper_mode else []
         for fill in fills:
@@ -198,6 +253,8 @@ def run_loop(config: Config, client) -> None:
         state.updated_at = utc_now()
         save_state(config.state_path, state)
         note = plan.reason
+        if budget_note:
+            note = f"{note}; budget={budget_note}"
         if adaptive_report is not None:
             note = f"{note}; adaptive={adaptive_report.policy_name}; report={adaptive_report.report_path}"
         append_run_log(
@@ -221,7 +278,7 @@ def run_loop(config: Config, client) -> None:
             },
         )
 
-        status = f"loop={state.loops} mid={book.midpoint:.4f} bid={plan.bid_price:.4f} ask={plan.ask_price:.4f} inv={state.inventory:.2f} mtm={mark_to_market(state, book.midpoint):.4f} fills={len(fills)}"
+        status = f"loop={state.loops} mid={book.midpoint:.4f} bid={plan.bid_price:.4f} ask={plan.ask_price:.4f} inv={state.inventory:.2f} cash={state.cash:.4f} mtm={mark_to_market(state, book.midpoint):.4f} dd={drawdown_pct(state, book.midpoint):.2%} fills={len(fills)}"
         if adaptive_report is not None:
             status = f"{status} adaptive={adaptive_report.policy_name}"
         print(status)

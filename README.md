@@ -193,6 +193,17 @@ python -m app.polymarket
 
 Optional runtime auto-pick modes:
 
+Polymarket can already auto-search markets at runtime:
+- `PM_SELECTION_MODE=scan` -> rescan Polymarket at startup and auto-pick the best accepted market
+- `PM_SELECTION_ROTATE_EVERY_LOOPS=<n>` -> periodically rescan and rotate only when allowed by inventory rules
+- `PM_SELECTION_ROTATE_ONLY_WHEN_FLAT=true` -> only rotate when inventory is flat
+
+Budget survival controls for the Polymarket paper-maker:
+- `PM_STARTING_CASH` -> starting paper budget for the loop
+- `PM_RESERVE_CASH` -> cash floor to protect; the bot stops opening new buys below this
+- `PM_MAX_DRAWDOWN_PCT` -> hard drawdown guard; if exceeded, the maker halts new risk-taking
+
+
 - `BINANCE_SELECTION_MODE=csv` -> load the first accepted row from `data/market/binance_candidates.csv`
 - `BINANCE_SELECTION_MODE=scan` -> rescan at startup, write `data/market/binance_candidates.csv`, and use the selected symbol and profile
 - `BINANCE_STRATEGY_PROFILE=auto` -> apply the profile chosen from the selected market regime

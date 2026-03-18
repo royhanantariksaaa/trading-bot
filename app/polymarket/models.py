@@ -45,6 +45,9 @@ class BotState:
     last_mid: float = 0.5
     loops: int = 0
     fills: int = 0
+    peak_mark_to_market: float = 0.0
+    halted: bool = False
+    halt_reason: str = ""
     updated_at: str = field(default_factory=utc_now)
 
     def to_dict(self) -> dict:

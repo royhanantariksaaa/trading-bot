@@ -17,9 +17,9 @@ from .notifier import DiscordNotifier
 from .paper_wallet import PaperWallet
 from .reconcile import reconcile_live_state
 from .risk import build_entry_plan, build_exit_plan
-from .state import clear_pending_ticket, load_state, save_state, today_str
+from .state import clear_pending_ticket, load_state, pending_ticket_clear_reason, save_state, today_str
 from .strategy import add_indicators, gate_status_for_index, signal_for_index
-from .tickets import append_decision_log, build_daily_summary, build_decision_message, build_ticket_message, update_ticket_status
+from .tickets import append_decision_log, build_daily_summary, build_decision_message, build_ticket_message, get_ticket, update_ticket_status
 
 
 def send_status(notifier: DiscordNotifier, message: str) -> None:
@@ -95,6 +95,25 @@ def maybe_log_terminal_decision(config: Config, notifier: DiscordNotifier, state
         send_status(notifier, build_decision_message(state.pending_ticket_id, decision))
         clear_pending_ticket(state)
         save_state(state_path, state)
+
+
+def _clear_stale_pending_ticket_if_safe(config: Config, state, tickets_path: Path) -> str:
+    if not state.pending_ticket_id:
+        return ""
+    ticket = get_ticket(tickets_path, state.pending_ticket_id)
+    reason = pending_ticket_clear_reason(
+        state,
+        bot_mode=config.bot_mode,
+        execution_mode=config.execution_mode,
+        ticket_status=(ticket or {}).get("status", ""),
+        ticket_exists=ticket is not None,
+    )
+    if not reason:
+        return ""
+    pending_ticket_id = state.pending_ticket_id
+    pending_action = state.pending_action or "?"
+    clear_pending_ticket(state)
+    return f"[STATE HYGIENE] Cleared pending ticket `{pending_ticket_id}` action=`{pending_action}` reason=`{reason}`"
 
 
 def _current_quote_balance(config: Config, state, wallet: PaperWallet | None) -> float:
@@ -242,6 +261,7 @@ def run_bot(config: Config) -> None:
         state.account_snapshot = reconcile_live_state(config, exchange, state, market_rules)
     elif config.bot_mode == "live":
         state.account_snapshot = fetch_account_snapshot(exchange, market_rules)
+    hygiene_message = _clear_stale_pending_ticket_if_safe(config, state, tickets_path)
     save_state(state_path, state)
 
     startup = format_startup_message(
@@ -257,6 +277,8 @@ def run_bot(config: Config) -> None:
         config.signal_on_closed_candle,
     )
     send_status(notifier, startup)
+    if hygiene_message:
+        send_status(notifier, hygiene_message)
     if selection_note:
         send_status(notifier, selection_note)
     if adaptive_note:
@@ -294,6 +316,10 @@ def run_bot(config: Config) -> None:
                     state.account_snapshot = fetch_account_snapshot(exchange, market_rules)
                 if config.execution_mode == "auto" and state.position is not None:
                     ensure_live_stop_loss(exchange=exchange, config=config, state=state, rules=market_rules, candle_time=state.last_signal_candle_time or today_str())
+
+            hygiene_message = _clear_stale_pending_ticket_if_safe(config, state, tickets_path)
+            if hygiene_message:
+                send_status(notifier, hygiene_message)
 
             if rotation.should_rotate(loops):
                 allowed, reason = _can_rotate_symbol(config, state)

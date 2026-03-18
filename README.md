@@ -192,6 +192,7 @@ The Binance runtime is position/order driven instead of ticket driven:
 - Binance symbol filters are validated before submit
 - live startup reconciliation reloads balances, open orders, and recent trades
 - live entries arm a protective stop-loss order after the entry fill
+- startup/runtime hygiene clears stale `pending_ticket_id` state only when it is safe: flat, no open orders, and either the referenced ticket is resolved/missing or the bot is running `BOT_MODE=paper` + `EXECUTION_MODE=auto`
 
 ## Runtime Files
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from typing import Literal
 from pathlib import Path
 
 from .models import AccountSnapshot, OrderState, PositionState
@@ -143,6 +144,32 @@ def has_open_order(state: BotState, side: str | None = None) -> bool:
     if side is None:
         return bool(state.open_orders)
     return any(order.side.upper() == side.upper() for order in state.open_orders)
+
+
+PendingTicketClearReason = Literal["", "resolved_ticket", "missing_ticket", "incompatible_auto_mode"]
+
+
+def pending_ticket_clear_reason(
+    state: BotState,
+    *,
+    bot_mode: str,
+    execution_mode: str,
+    ticket_status: str = "",
+    ticket_exists: bool = True,
+) -> PendingTicketClearReason:
+    if not state.pending_ticket_id:
+        return ""
+    if state.position is not None or state.open_orders:
+        return ""
+
+    normalized_status = ticket_status.strip().lower()
+    if normalized_status and normalized_status != "pending":
+        return "resolved_ticket"
+    if not ticket_exists:
+        return "missing_ticket"
+    if execution_mode == "auto" and bot_mode == "paper":
+        return "incompatible_auto_mode"
+    return ""
 
 
 def apply_entry_fill(

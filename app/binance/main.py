@@ -15,7 +15,13 @@ from .formatters import format_no_trade_message, format_readonly_startup_message
 from .logger import fmt_pct, log_event
 from .notifier import DiscordNotifier
 from .paper_wallet import PaperWallet
-from .readonly_report import build_live_readonly_report, render_live_readonly_report, write_live_readonly_report
+from .readonly_report import (
+    build_live_readonly_report,
+    format_live_readonly_notification,
+    readonly_notification_key,
+    render_live_readonly_report,
+    write_live_readonly_report,
+)
 from .reconcile import reconcile_live_state
 from .risk import build_entry_plan, build_exit_plan
 from .state import clear_pending_ticket, load_state, pending_ticket_clear_reason, save_state, today_str
@@ -282,6 +288,10 @@ def run_bot(config: Config) -> None:
         hygiene_message = _clear_stale_pending_ticket_if_safe(config, state, tickets_path)
         save_state(state_path, state)
 
+    readonly_last_notification_key = ""
+    readonly_last_notification_loop = -1
+    readonly_notification_interval_loops = max(1, int(3600 / max(config.poll_seconds, 1)))
+
     if config.live_readonly_mode:
         startup = format_readonly_startup_message(
             config.symbol,
@@ -298,6 +308,7 @@ def run_bot(config: Config) -> None:
             enable_live_trading=config.enable_live_trading,
         )
         print(startup, flush=True)
+        send_status(notifier, startup)
     else:
         startup = format_startup_message(
             config.symbol,
@@ -317,9 +328,9 @@ def run_bot(config: Config) -> None:
             print(hygiene_message)
         else:
             send_status(notifier, hygiene_message)
-    if selection_note and not config.live_readonly_mode:
+    if selection_note:
         send_status(notifier, selection_note)
-    if adaptive_note and not config.live_readonly_mode:
+    if adaptive_note:
         send_status(notifier, adaptive_note)
     if not config.live_readonly_mode:
         maybe_send_daily_summary(config, notifier, state_path, tickets_path, trades_path)
@@ -496,6 +507,23 @@ def run_bot(config: Config) -> None:
                     config.readonly_report_json_path,
                 )
                 print(render_live_readonly_report(readonly_report), end="", flush=True)
+                notification_key = readonly_notification_key(readonly_report)
+                should_send_readonly = (
+                    notification_key != readonly_last_notification_key
+                    or readonly_last_notification_loop < 0
+                    or (loops - readonly_last_notification_loop) >= readonly_notification_interval_loops
+                )
+                if should_send_readonly:
+                    send_status(
+                        notifier,
+                        format_live_readonly_notification(
+                            readonly_report,
+                            include_selection=notification_key != readonly_last_notification_key or readonly_last_notification_loop < 0,
+                            include_adaptive=notification_key != readonly_last_notification_key or readonly_last_notification_loop < 0,
+                        ),
+                    )
+                    readonly_last_notification_key = notification_key
+                    readonly_last_notification_loop = loops
                 loops += 1
                 state.last_processed_candle_time = candle_time
                 time.sleep(config.poll_seconds)

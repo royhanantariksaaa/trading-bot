@@ -433,6 +433,76 @@ def build_live_readonly_report(
     return report
 
 
+def readonly_notification_key(report: ReadonlyReport) -> str:
+    position_state = "flat"
+    if report.position is not None:
+        position_state = (
+            f"long:{report.position.qty:.6f}:{report.position.entry_price:.4f}:"
+            f"{report.position.stop_loss:.4f}:{report.position.take_profit:.4f}"
+        )
+    return "|".join(
+        [
+            report.symbol,
+            report.timeframe,
+            report.signal or "hold",
+            report.decision_action,
+            report.decision_reason,
+            "1" if report.htf_ok else "0",
+            position_state,
+            report.sell_reason,
+        ]
+    )
+
+
+def format_live_readonly_notification(
+    report: ReadonlyReport,
+    *,
+    include_selection: bool = False,
+    include_adaptive: bool = False,
+) -> str:
+    lines = [
+        "[BINANCE READONLY]",
+        f"Pair: `{report.symbol}` | TF: `{report.timeframe}` | Signal: `{report.signal or 'hold'}`",
+        f"Proposed action: `{report.decision_action}` | HTF ok: `{report.htf_ok}`",
+        f"Live / Signal price: `{report.live_price:.4f}` / `{report.signal_price:.4f}` | Quote free: `{report.quote_free:.4f}`",
+    ]
+    if report.position is not None:
+        lines.append(
+            f"Position: `long qty={report.position.qty:.6f} entry={report.position.entry_price:.4f} stop={report.position.stop_loss:.4f} tp={report.position.take_profit:.4f}`"
+        )
+    else:
+        lines.append("Position: `flat`")
+    if include_selection:
+        if report.selection is not None:
+            lines.append(f"Selected market: `{report.selection.summary}`")
+        elif report.selection_note:
+            lines.append(f"Selected market: `{report.selection_note}`")
+    if include_adaptive:
+        if report.adaptive_report is not None:
+            lines.append(f"Adaptive summary: `{report.adaptive_report.summary()}`")
+        elif report.adaptive_note:
+            lines.append(f"Adaptive summary: `{report.adaptive_note}`")
+    if report.decision_reason:
+        lines.append(f"Reason: {report.decision_reason}")
+    for reason in report.decision_reasons[:3]:
+        lines.append(f"- {reason}")
+    if report.sell_reason:
+        lines.append(f"Exit trigger: `{report.sell_reason}`")
+    if report.entry_plan is not None:
+        lines.append(
+            f"Entry preview: quote=`{report.entry_plan.quote_budget:.4f}` qty=`{report.entry_plan.estimated_qty:.6f}` sl=`{report.entry_plan.stop_loss:.4f}` tp=`{report.entry_plan.take_profit:.4f}`"
+        )
+        if report.entry_plan.market_warning:
+            lines.append(f"Entry warning: {report.entry_plan.market_warning}")
+    if report.exit_plan is not None:
+        lines.append(f"Exit preview: qty=`{report.exit_plan.qty:.6f}`")
+        if report.exit_plan.market_warning:
+            lines.append(f"Exit warning: {report.exit_plan.market_warning}")
+    if report.report_path is not None or report.report_json_path is not None:
+        lines.append(f"Reports: `{report.report_path or ''}` | `{report.report_json_path or ''}`")
+    return "\n".join(lines)
+
+
 def render_live_readonly_report(report: ReadonlyReport) -> str:
     lines = [
         f"Binance live read-only report for venue={report.venue} at {report.scanned_at}",

@@ -91,6 +91,15 @@ BINANCE_READONLY_REPORT_JSON_PATH=data/market/binance_live_readonly_report.json
 This mode reads balances, account state, open orders, the selected market, and the adaptive overlay, then writes a human-readable report and JSON snapshot. It never calls submit, test, or cancel order methods.
 `BINANCE_ADAPTIVE_MODE=paper` is accepted in this mode because `BOT_MODE=live_readonly` is non-executing.
 
+If `DISCORD_WEBHOOK_URL` is configured, live readonly now also sends compact Discord summaries for:
+- startup / read-only guard summary
+- selected market summary
+- adaptive overlay summary
+- proposed action preview (`HOLD`, `BUY`, `SELL`, `SKIP BUY`, `SKIP SELL`)
+- key reason / trigger lines for hold, skip, buy, and sell decisions
+
+The full text/JSON reports still stay local. Discord notifications are compact and change-based: the bot sends them when the readonly decision summary changes, plus a reminder at most about once per hour if nothing changes, instead of dumping the full report every loop.
+
 Live readonly now also separates Binance dust / unactionable inventory from managed position state. If the wallet holds a tiny balance that falls below the bot's actionable sell threshold for the tracked symbol (roughly Binance min-notional with a small 5% safety buffer, plus lot-size checks), that inventory stays visible in the report/JSON under `dust_holdings` but does not count as an open managed position.
 
 ## Run Binance

@@ -8,7 +8,12 @@ from app.binance.adaptive import AdaptiveDecisionReport, RecentHistorySnapshot
 from app.binance.config import Config as BinanceConfig
 from app.binance.main import _adaptive_runtime_allows
 from app.binance.models import AccountSnapshot, DustHolding, WalletHolding
-from app.binance.readonly_report import build_live_readonly_report, write_live_readonly_report
+from app.binance.readonly_report import (
+    build_live_readonly_report,
+    format_live_readonly_notification,
+    readonly_notification_key,
+    write_live_readonly_report,
+)
 from app.binance.exchange import SymbolRules
 from app.binance.state import BotState
 from app.selection.models import MarketMetrics
@@ -218,6 +223,19 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
         self.assertEqual(payload["selection"]["symbol"], "SOL/USDT")
         self.assertEqual(payload["adaptive_report"]["selected_profile"]["name"], adaptive_profile.name)
         self.assertEqual(payload["account_snapshot"]["dust_holdings"][0]["asset"], "XRP")
+
+        notification = format_live_readonly_notification(report, include_selection=True, include_adaptive=True)
+        self.assertIn("[BINANCE READONLY]", notification)
+        self.assertIn("Selected market:", notification)
+        self.assertIn("Adaptive summary:", notification)
+        self.assertIn("Proposed action: `BUY`", notification)
+        self.assertIn("Reason: buy signal passed sizing and filters", notification)
+        self.assertIn("Reports:", notification)
+
+        first_key = readonly_notification_key(report)
+        self.assertIn("BUY", first_key)
+        report.decision_reason = "changed reason"
+        self.assertNotEqual(first_key, readonly_notification_key(report))
 
 
 if __name__ == "__main__":

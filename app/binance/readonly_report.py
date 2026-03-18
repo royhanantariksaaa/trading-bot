@@ -14,6 +14,29 @@ from .risk import build_entry_plan, build_exit_plan
 from .state import BotState
 
 
+@dataclass(slots=True)
+class HoldingSignalSnapshot:
+    asset: str
+    symbol: str
+    total: float
+    free: float
+    locked: float
+    tradable: bool
+    note: str = ""
+    signal: str = "hold"
+    action: str = "HOLD"
+    reason: str = ""
+    signal_price: float = 0.0
+    live_price: float = 0.0
+    ema_fast: float = 0.0
+    ema_slow: float = 0.0
+    rsi: float = 0.0
+    htf_text: str = ""
+    htf_ok: bool = True
+    gates: dict[str, bool] = field(default_factory=dict)
+    estimated_notional: float | None = None
+
+
 def _format_float(value: float | None, *, precision: int = 4) -> str:
     if value is None:
         return "missing"
@@ -101,6 +124,7 @@ class ReadonlyReport:
     exit_plan: ExitPlan | None = None
     report_path: Path | None = None
     report_json_path: Path | None = None
+    holding_signals: list[HoldingSignalSnapshot] = field(default_factory=list)
 
     def summary(self) -> str:
         exposure = "flat"
@@ -202,6 +226,28 @@ class ReadonlyReport:
                     lines.append(f"- {_format_owned_asset(item.asset, item.total, action, reason, notional=notional, symbol=symbol)}")
                 if len(ordered_wallet) > 12:
                     lines.append(f"- ... {len(ordered_wallet) - 12} more assets")
+            if self.holding_signals:
+                lines.append("Holding signals")
+                for row in self.holding_signals[:12]:
+                    base = (
+                        f"- {row.asset}: total=`{row.total:.6f}` | symbol=`{row.symbol or 'n/a'}` | "
+                        f"action=`{row.action}` | signal=`{row.signal}`"
+                    )
+                    if row.estimated_notional is not None:
+                        base += f" | notional≈`{row.estimated_notional:.4f}`"
+                    lines.append(base)
+                    if row.tradable:
+                        lines.append(
+                            f"  - px/live=`{row.signal_price:.4f}`/`{row.live_price:.4f}` | RSI=`{row.rsi:.2f}` | EMA=`{row.ema_fast:.4f}/{row.ema_slow:.4f}` | HTF=`{row.htf_ok}`"
+                        )
+                        lines.append(
+                            f"  - gates: ema_up=`{row.gates.get('crossed_up', False)}` ema_down=`{row.gates.get('crossed_down', False)}` rsi_entry=`{row.gates.get('rsi_buy_ok', False)}` rsi_exit=`{row.gates.get('rsi_sell_ok', False)}`"
+                        )
+                        lines.append(f"  - reason: {row.reason or 'none'}")
+                    else:
+                        lines.append(f"  - note: {row.note or row.reason or 'not tradable under current strategy'}")
+                if len(self.holding_signals) > 12:
+                    lines.append(f"- ... {len(self.holding_signals) - 12} more holding signals")
             if holdings:
                 lines.append("Raw holdings:")
                 ordered = sorted(
@@ -337,6 +383,7 @@ def build_live_readonly_report(
     selection_note: str = "",
     adaptive_report: AdaptiveDecisionReport | None = None,
     adaptive_note: str = "",
+    holding_signals: list[HoldingSignalSnapshot] | None = None,
 ) -> ReadonlyReport:
     entry_plan = None
     exit_plan = None
@@ -467,6 +514,7 @@ def build_live_readonly_report(
         blocked_by="live_readonly (no submit/test/cancel)",
         entry_plan=entry_plan,
         exit_plan=exit_plan,
+        holding_signals=list(holding_signals or []),
     )
     return report
 
@@ -604,6 +652,8 @@ def format_live_readonly_notification(
     if compact:
         if report.account_snapshot is not None:
             dust_assets = len(report.account_snapshot.dust_holdings or [])
+            tradable_holdings = sum(1 for item in report.holding_signals if item.tradable)
+            blocked_holdings = sum(1 for item in report.holding_signals if not item.tradable)
             wallet_only_assets = sum(
                 1
                 for item in (report.account_snapshot.holdings or [])
@@ -611,7 +661,9 @@ def format_live_readonly_notification(
                 and item.asset not in {dust.asset for dust in (report.account_snapshot.dust_holdings or [])}
                 and not (report.position is not None and item.asset == report.account_snapshot.base_asset)
             )
-            lines.append(f"Owned assets: wallet_only=`{wallet_only_assets}` dust=`{dust_assets}`")
+            lines.append(
+                f"Owned assets: wallet_only=`{wallet_only_assets}` tradable=`{tradable_holdings}` blocked=`{blocked_holdings}` dust=`{dust_assets}`"
+            )
         if report.sell_reason:
             lines.append(f"Exit trigger: `{_compact_text(report.sell_reason, limit=180)}`")
         if report.entry_plan is not None:

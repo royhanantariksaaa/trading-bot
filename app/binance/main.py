@@ -16,6 +16,7 @@ from .logger import fmt_pct, log_event
 from .notifier import DiscordNotifier
 from .paper_wallet import PaperWallet
 from .readonly_report import (
+    HoldingSignalSnapshot,
     build_live_readonly_report,
     format_live_readonly_notification,
     readonly_decision_summary_key,
@@ -255,6 +256,106 @@ def _can_rotate_symbol(config: Config, state) -> tuple[bool, str]:
     return True, "rotation allowed while flat"
 
 
+def _holding_signal_action(signal: str, htf_ok: bool) -> tuple[str, str]:
+    if signal == "buy" and htf_ok:
+        return "WATCH BUY", "buy setup detected on owned asset"
+    if signal == "buy" and not htf_ok:
+        return "WAIT", "buy setup blocked by HTF filter"
+    if signal == "sell":
+        return "REVIEW SELL", "sell setup detected on owned asset"
+    return "HOLD", "no actionable setup on owned asset"
+
+
+def _build_holding_signals(config: Config, exchange, state) -> list[HoldingSignalSnapshot]:
+    snapshot = state.account_snapshot
+    if snapshot is None:
+        return []
+
+    quote_asset = (snapshot.quote_asset or "").upper()
+    dust_assets = {item.asset for item in (snapshot.dust_holdings or [])}
+    rows: list[HoldingSignalSnapshot] = []
+
+    for item in sorted(snapshot.holdings or [], key=lambda row: (-row.total, row.asset)):
+        asset = (item.asset or "").upper()
+        if item.total <= 0 or asset == quote_asset or asset in dust_assets:
+            continue
+
+        symbol = f"{asset}/{quote_asset}"
+        market = exchange.markets.get(symbol)
+        if market is None or not market.get("active", True):
+            rows.append(
+                HoldingSignalSnapshot(
+                    asset=asset,
+                    symbol=symbol,
+                    total=item.total,
+                    free=item.free,
+                    locked=item.locked,
+                    tradable=False,
+                    note="no active spot market found for holding against quote asset",
+                )
+            )
+            continue
+
+        try:
+            df = fetch_ohlcv_df(exchange, symbol, config.timeframe)
+            df = add_indicators(df, fast=config.ema_fast_period, slow=config.ema_slow_period, rsi_period=config.rsi_period)
+            signal_index = len(df) - 2 if config.signal_on_closed_candle else len(df) - 1
+            signal_row = df.iloc[signal_index]
+            live_row = df.iloc[-1]
+            gates = gate_status_for_index(
+                df,
+                signal_index,
+                use_rsi_filter=config.use_rsi_filter,
+                rsi_buy_min=config.rsi_buy_min,
+                rsi_sell_max=config.rsi_sell_max,
+            )
+            signal = signal_for_index(
+                df,
+                signal_index,
+                use_rsi_filter=config.use_rsi_filter,
+                rsi_buy_min=config.rsi_buy_min,
+                rsi_sell_max=config.rsi_sell_max,
+            )
+            htf_ok = True
+            htf_text = "htf=off"
+            action, reason = _holding_signal_action(signal, htf_ok)
+            rows.append(
+                HoldingSignalSnapshot(
+                    asset=asset,
+                    symbol=symbol,
+                    total=item.total,
+                    free=item.free,
+                    locked=item.locked,
+                    tradable=True,
+                    signal=signal,
+                    action=action,
+                    reason=reason,
+                    signal_price=float(signal_row["close"]),
+                    live_price=float(live_row["close"]),
+                    ema_fast=float(signal_row["ema_fast"]),
+                    ema_slow=float(signal_row["ema_slow"]),
+                    rsi=float(signal_row["rsi"]) if signal_row["rsi"] == signal_row["rsi"] else float("nan"),
+                    htf_text=htf_text,
+                    htf_ok=htf_ok,
+                    gates=gates,
+                    estimated_notional=item.total * float(live_row["close"]),
+                )
+            )
+        except Exception as exc:
+            rows.append(
+                HoldingSignalSnapshot(
+                    asset=asset,
+                    symbol=symbol,
+                    total=item.total,
+                    free=item.free,
+                    locked=item.locked,
+                    tradable=False,
+                    note=f"signal lookup failed: {exc}",
+                )
+            )
+    return rows
+
+
 def run_bot(config: Config) -> None:
     selection_note, selected_runtime = _maybe_apply_selected_symbol(config)
     rotation = config.rotation_controller
@@ -483,6 +584,7 @@ def run_bot(config: Config) -> None:
             sell_reason = _resolve_exit_reason(config, state, signal, signal_price, live_row) if state.position is not None else ""
 
             if config.live_readonly_mode:
+                holding_signals = _build_holding_signals(config, exchange, state)
                 readonly_report = build_live_readonly_report(
                     config=config,
                     state=state,
@@ -503,6 +605,7 @@ def run_bot(config: Config) -> None:
                     selection_note=selection_note or "",
                     adaptive_report=adaptive_report,
                     adaptive_note=adaptive_note or "",
+                    holding_signals=holding_signals,
                 )
                 write_live_readonly_report(
                     readonly_report,

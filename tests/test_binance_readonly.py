@@ -9,6 +9,7 @@ from app.binance.config import Config as BinanceConfig
 from app.binance.main import _adaptive_runtime_allows
 from app.binance.models import AccountSnapshot, DustHolding, WalletHolding
 from app.binance.readonly_report import (
+    HoldingSignalSnapshot,
     build_live_readonly_report,
     format_live_readonly_notification,
     readonly_decision_summary_key,
@@ -213,6 +214,33 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
             selection_note="scan selected the strongest trending market",
             adaptive_report=adaptive_report,
             adaptive_note="adaptive overlay applied in read-only mode",
+            holding_signals=[
+                HoldingSignalSnapshot(
+                    asset="SOL",
+                    symbol="SOL/USDT",
+                    total=1.2,
+                    free=1.2,
+                    locked=0.0,
+                    tradable=True,
+                    signal="buy",
+                    action="WATCH BUY",
+                    reason="buy setup detected on owned asset",
+                    signal_price=150.0,
+                    live_price=151.0,
+                    ema_fast=149.2,
+                    ema_slow=148.4,
+                    rsi=62.0,
+                    htf_text="htf=off",
+                    htf_ok=True,
+                    gates={
+                        "crossed_up": True,
+                        "crossed_down": False,
+                        "rsi_buy_ok": True,
+                        "rsi_sell_ok": False,
+                    },
+                    estimated_notional=181.2,
+                )
+            ],
         )
 
         path = Path(__file__).resolve().parent / ".tmp_binance_live_readonly_report.txt"
@@ -231,6 +259,8 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
         self.assertIn("Adaptive overlay", text)
         self.assertIn("Wallet-only holdings:", text)
         self.assertIn("SOL: action=HOLD", text)
+        self.assertIn("Holding signals", text)
+        self.assertIn("action=`WATCH BUY` | signal=`buy`", text)
         self.assertIn("Dust / unactionable inventory", text)
         self.assertIn("XRP: action=CANNOT ACT", text)
         self.assertIn("Proposed action: `BUY`", text)

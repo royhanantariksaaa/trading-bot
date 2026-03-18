@@ -202,6 +202,11 @@ Budget survival controls for the Polymarket paper-maker:
 - `PM_STARTING_CASH` -> starting paper budget for the loop
 - `PM_RESERVE_CASH` -> cash floor to protect; the bot stops opening new buys below this
 - `PM_MAX_DRAWDOWN_PCT` -> hard drawdown guard; if exceeded, the maker halts new risk-taking
+- `PM_MAX_RUN_LOSS_USD` -> absolute per-run loss cap against starting cash
+- `PM_MAX_BUY_FRACTION_OF_SPENDABLE` -> caps each fresh buy to a fraction of spendable cash instead of letting the maker dump the whole remaining budget into one loop
+- `PM_MIN_CASH_BUFFER_PCT` -> extra cash buffer on top of reserve cash for survival-first sizing
+- `PM_HARD_HALT_MODE=flat_stop` -> in paper mode, liquidates long inventory at the best bid and stops the run instead of just pausing new buys
+- `PM_SUPERVISION_REPORT_PATH` -> compact text + JSON per-run health/budget report path
 
 
 - `BINANCE_SELECTION_MODE=csv` -> load the first accepted row from `data/market/binance_candidates.csv`
@@ -258,7 +263,7 @@ Defaults live under `data/`:
 - `data/logs/polymarket_runs.csv`: Polymarket loop log
 - `data/market/`: ad hoc market CSV snapshots and local samples
 
-All of those paths can be overridden with env vars such as `BINANCE_STATE_PATH`, `BINANCE_TRADES_PATH`, `BINANCE_BACKTEST_OUTPUT_PATH`, `BINANCE_ADAPTIVE_REPORT_PATH`, `BINANCE_READONLY_REPORT_PATH`, `BINANCE_READONLY_REPORT_JSON_PATH`, `PORTFOLIO_STATE_PATH`, `PORTFOLIO_REPORT_PATH`, `PORTFOLIO_REPORT_JSON_PATH`, `PM_STATE_PATH`, and `PM_LOG_PATH`.
+All of those paths can be overridden with env vars such as `BINANCE_STATE_PATH`, `BINANCE_TRADES_PATH`, `BINANCE_BACKTEST_OUTPUT_PATH`, `BINANCE_ADAPTIVE_REPORT_PATH`, `BINANCE_READONLY_REPORT_PATH`, `BINANCE_READONLY_REPORT_JSON_PATH`, `PORTFOLIO_STATE_PATH`, `PORTFOLIO_REPORT_PATH`, `PORTFOLIO_REPORT_JSON_PATH`, `PM_STATE_PATH`, `PM_LOG_PATH`, and `PM_SUPERVISION_REPORT_PATH`.
 
 ## Notes
 
@@ -273,5 +278,7 @@ Still not a finished production platform:
 - take-profit is software-managed; only stop-loss is armed as a live protective order
 - there is no full monitoring/heartbeat layer yet
 - the portfolio allocator is paper/report only in v1; live multi-position execution remains on the roadmap
+- Polymarket live trading is still NOT complete here: this repo now includes fail-closed live scaffolding and config placeholders, but not a verified signed execution client
+- specifically still missing for true Polymarket live trading: authenticated CLOB client wiring, signed place/cancel flow, live balances/positions fetch, open-order reconciliation, fill sync, and venue-safe order lifecycle handling
 
 Use `USE_TESTNET=true` first, keep size tiny, and rotate any webhook or API secret that may already have been exposed.

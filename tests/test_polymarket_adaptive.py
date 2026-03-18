@@ -61,7 +61,7 @@ class PolymarketAdaptiveTest(unittest.TestCase):
     def test_resolve_runtime_config_applies_overlay_in_paper_mode(self) -> None:
         path = Path(__file__).resolve().parent / ".tmp_pm_runtime_report.txt"
         config = self.make_config(report_path=path, adaptive_mode="paper", paper_mode=True)
-        state = BotState(last_mid=0.50, loops=1)
+        state = BotState(last_mid=0.50, loops=1, cash=config.starting_cash)
         book = make_book(bid=0.48, ask=0.52)
         runtime_config, report = resolve_runtime_config(config, book, state, FakeAdaptiveClient())
         self.assertIsNotNone(report)

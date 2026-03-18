@@ -9,13 +9,17 @@ What it does:
 - computes bid/ask quotes around the midpoint
 - skews quotes based on inventory
 - enforces simple inventory/notional caps
+- adds a compact supervision report (text + JSON) for budget/health state each run
+- supports hard halt / flat-and-stop in paper mode when drawdown, reserve, or run-loss guards trip
 - simulates fills in paper mode when quotes cross the best bid/ask
 - persists state to JSON and loop logs to CSV
 
 What it does **not** do yet:
-- authenticated live order placement
+- authenticated live order placement (only fail-closed scaffolding is present)
 - websocket book streaming
 - cancel/replace order management on the real venue
+- verified balances / positions / open-order fetch against a live account
+- fill sync / reconciliation for real live orders
 - smart inventory hedging across YES/NO pairs
 - resolution / event lifecycle handling
 

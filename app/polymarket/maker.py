@@ -9,7 +9,8 @@ from pathlib import Path
 from ..selection.runtime import maybe_rotate_runtime_selection
 from .adaptive import evaluate_adaptive_policy
 from .config import Config
-from .models import BotState, BookSnapshot, FillResult, QuotePlan, utc_now
+from .execution import UnimplementedLiveGateway
+from .models import BotState, BookSnapshot, FillResult, QuotePlan, SupervisionReport, utc_now
 
 
 def clamp(value: float, lower: float, upper: float) -> float:
@@ -76,6 +77,10 @@ def drawdown_pct(state: BotState, mid: float) -> float:
     return max(0.0, (state.peak_mark_to_market - equity) / state.peak_mark_to_market)
 
 
+def run_loss_usd(config: Config, state: BotState, mid: float) -> float:
+    return max(0.0, config.starting_cash - mark_to_market(state, mid))
+
+
 def update_budget_state(config: Config, state: BotState, mid: float) -> str | None:
     equity = mark_to_market(state, mid)
     if state.peak_mark_to_market <= 0:
@@ -83,19 +88,31 @@ def update_budget_state(config: Config, state: BotState, mid: float) -> str | No
     else:
         state.peak_mark_to_market = max(state.peak_mark_to_market, equity)
 
+    halt_reason = ""
     if budget_floor_reached(config, state, mid):
-        state.halted = True
-        state.halt_reason = f"budget floor reached: equity={equity:.4f} reserve={config.reserve_cash:.4f}"
-        return state.halt_reason
+        halt_reason = f"budget floor reached: equity={equity:.4f} reserve={config.reserve_cash:.4f}"
+    else:
+        current_drawdown = drawdown_pct(state, mid)
+        if current_drawdown >= config.max_drawdown_pct:
+            halt_reason = f"max drawdown reached: drawdown={current_drawdown:.2%} limit={config.max_drawdown_pct:.2%}"
+        else:
+            current_run_loss = run_loss_usd(config, state, mid)
+            if current_run_loss >= config.max_run_loss_usd:
+                halt_reason = f"max run loss reached: loss={current_run_loss:.4f} limit={config.max_run_loss_usd:.4f}"
 
-    current_drawdown = drawdown_pct(state, mid)
-    if current_drawdown >= config.max_drawdown_pct:
+    if halt_reason:
         state.halted = True
-        state.halt_reason = f"max drawdown reached: drawdown={current_drawdown:.2%} limit={config.max_drawdown_pct:.2%}"
-        return state.halt_reason
+        state.halt_reason = halt_reason
+        if config.hard_halt_mode == "flat_stop":
+            state.stop_after_flatten = True
+            state.flatten_pending = state.inventory > 0
+        return halt_reason
 
-    state.halted = False
-    state.halt_reason = ""
+    if not state.stopped:
+        state.halted = False
+        state.halt_reason = ""
+        state.stop_after_flatten = False
+        state.flatten_pending = False
     return None
 
 
@@ -143,22 +160,40 @@ def compute_quote_plan(config: Config, state: BotState, book: BookSnapshot) -> Q
 
     current_equity = mark_to_market(state, book.midpoint)
     spendable_cash = max(0.0, state.cash - config.reserve_cash)
-    if spendable_cash <= 0:
+    survival_buffer = max(config.reserve_cash, config.starting_cash * config.min_cash_buffer_pct)
+    survival_spendable = max(0.0, state.cash - survival_buffer)
+    per_loop_budget = min(spendable_cash, survival_spendable, spendable_cash * config.max_buy_fraction_of_spendable)
+    if spendable_cash <= 0 or per_loop_budget <= 0:
         buy_size = 0.0
     else:
-        buy_size = min(buy_size, spendable_cash / max(book.best_ask, book.tick_size))
+        buy_size = min(buy_size, per_loop_budget / max(book.best_ask, book.tick_size))
         if buy_size < config.min_order_size:
             buy_size = 0.0
 
-    if state.inventory * book.midpoint >= config.max_position_notional:
+    inventory_room = max(0.0, config.max_inventory - state.inventory)
+    if inventory_room <= 0:
         buy_size = 0.0
-    if abs(state.inventory) * book.midpoint >= config.max_position_notional and state.inventory <= 0:
+    else:
+        buy_size = min(buy_size, inventory_room)
+
+    max_notional_room = max(0.0, config.max_position_notional - max(0.0, state.inventory) * book.midpoint)
+    if max_notional_room <= 0:
+        buy_size = 0.0
+    else:
+        buy_size = min(buy_size, max_notional_room / max(book.best_ask, book.tick_size))
+        if buy_size < config.min_order_size:
+            buy_size = 0.0
+
+    sell_size = min(sell_size, max(0.0, state.inventory))
+    if sell_size < config.min_order_size:
         sell_size = 0.0
     if current_equity <= config.reserve_cash or state.halted:
         buy_size = 0.0
 
     reason = "inventory-balanced"
-    if state.halted:
+    if state.stopped:
+        reason = f"stopped:{state.stop_reason or state.halt_reason}"
+    elif state.halted:
         reason = f"halted:{state.halt_reason}"
     elif current_equity <= config.reserve_cash:
         reason = "budget-floor-protect"
@@ -186,6 +221,29 @@ def maybe_fill_quotes(state: BotState, book: BookSnapshot, plan: QuotePlan) -> l
     return fills
 
 
+def maybe_flatten_on_halt(config: Config, state: BotState, book: BookSnapshot) -> list[FillResult]:
+    if not config.paper_mode or not state.halted or not state.stop_after_flatten or state.stopped:
+        return []
+    if state.inventory <= 0:
+        state.flatten_pending = False
+        state.stopped = True
+        state.stop_reason = state.halt_reason or "flat-stop completed while already flat"
+        return []
+    fill = FillResult(
+        side="SELL",
+        price=book.best_bid,
+        size=state.inventory,
+        notional=book.best_bid * state.inventory,
+        reason=f"flat-stop:{state.halt_reason or 'paper halt'}",
+    )
+    apply_fill(state, fill)
+    state.flatten_pending = False
+    state.stopped = True
+    state.stop_reason = state.halt_reason or "flat-stop completed"
+    state.updated_at = utc_now()
+    return [fill]
+
+
 def apply_fill(state: BotState, fill: FillResult) -> None:
     if fill.side == "BUY":
         state.inventory += fill.size
@@ -200,6 +258,50 @@ def apply_fill(state: BotState, fill: FillResult) -> None:
     state.updated_at = utc_now()
 
 
+def build_supervision_report(config: Config, state: BotState, book: BookSnapshot, plan: QuotePlan, *, notes: list[str] | None = None) -> SupervisionReport:
+    mtm = mark_to_market(state, book.midpoint)
+    inventory_mark = state.inventory * book.midpoint
+    spendable_cash = max(0.0, state.cash - config.reserve_cash)
+    health = "healthy"
+    if state.stopped:
+        health = "stopped"
+    elif state.halted:
+        health = "halted"
+    elif spendable_cash <= 0:
+        health = "reserve_only"
+    return SupervisionReport(
+        timestamp=state.updated_at,
+        loop=state.loops,
+        token_id=config.token_id,
+        mode="paper" if config.paper_mode else "live_scaffold",
+        health=health,
+        cash=state.cash,
+        reserve_cash=config.reserve_cash,
+        spendable_cash=spendable_cash,
+        mark_to_market=mtm,
+        peak_mark_to_market=state.peak_mark_to_market,
+        drawdown_pct=drawdown_pct(state, book.midpoint),
+        inventory=state.inventory,
+        inventory_mark_value=inventory_mark,
+        max_inventory=config.max_inventory,
+        halt_reason=state.halt_reason,
+        stop_reason=state.stop_reason,
+        flatten_pending=state.flatten_pending,
+        buy_quote_size=plan.buy_size,
+        sell_quote_size=plan.sell_size,
+        notes=notes or [],
+    )
+
+
+def write_supervision_report(path: Path, report: SupervisionReport) -> tuple[Path, Path]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    report_path = path
+    report_json_path = path.with_suffix(".json") if path.suffix else path.with_name(path.name + ".json")
+    report_path.write_text(report.to_text(), encoding="utf-8")
+    report_json_path.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+    return report_path, report_json_path
+
+
 def _can_rotate_market(config: Config, state: BotState) -> tuple[bool, str]:
     if config.selection_mode == "manual":
         return False, "rotation disabled in manual selection mode"
@@ -212,6 +314,13 @@ def _can_rotate_market(config: Config, state: BotState) -> tuple[bool, str]:
 
 def run_loop(config: Config, client) -> None:
     config.validate()
+    if config.live_enabled:
+        if not config.live_allow_unverified:
+            raise NotImplementedError(
+                "PM_LIVE_ENABLED=true is blocked because this repo only has live scaffolding right now. Keep PM_PAPER_MODE=true or set PM_ALLOW_UNVERIFIED_LIVE=true if you only want the explicit readiness error path."
+            )
+        UnimplementedLiveGateway(config.live_credentials).validate_ready()
+
     state = load_state(config.state_path)
     if state.loops == 0 and state.cash == 0 and state.inventory == 0:
         state.cash = config.starting_cash
@@ -222,6 +331,10 @@ def run_loop(config: Config, client) -> None:
 
     remaining = config.loops
     while True:
+        if state.stopped:
+            print(f"stopped reason={state.stop_reason or state.halt_reason}")
+            break
+
         if rotation.should_rotate(state.loops):
             allowed, reason = _can_rotate_market(config, state)
             if allowed:
@@ -248,15 +361,24 @@ def run_loop(config: Config, client) -> None:
         fills = maybe_fill_quotes(state, book, plan) if config.paper_mode else []
         for fill in fills:
             apply_fill(state, fill)
+        halt_fills = maybe_flatten_on_halt(config, state, book)
+        fills.extend(halt_fills)
 
         state.loops += 1
         state.updated_at = utc_now()
-        save_state(config.state_path, state)
         note = plan.reason
+        notes: list[str] = []
         if budget_note:
             note = f"{note}; budget={budget_note}"
+            notes.append(budget_note)
         if adaptive_report is not None:
             note = f"{note}; adaptive={adaptive_report.policy_name}; report={adaptive_report.report_path}"
+            notes.append(f"adaptive={adaptive_report.policy_name}")
+        if halt_fills:
+            notes.append("flat-stop-executed")
+        report = build_supervision_report(runtime_config, state, book, plan, notes=notes)
+        write_supervision_report(config.supervision_report_path, report)
+        save_state(config.state_path, state)
         append_run_log(
             config.log_path,
             {
@@ -278,9 +400,13 @@ def run_loop(config: Config, client) -> None:
             },
         )
 
-        status = f"loop={state.loops} mid={book.midpoint:.4f} bid={plan.bid_price:.4f} ask={plan.ask_price:.4f} inv={state.inventory:.2f} cash={state.cash:.4f} mtm={mark_to_market(state, book.midpoint):.4f} dd={drawdown_pct(state, book.midpoint):.2%} fills={len(fills)}"
+        status = f"loop={state.loops} health={report.health} mid={book.midpoint:.4f} bid={plan.bid_price:.4f} ask={plan.ask_price:.4f} inv={state.inventory:.2f} cash={state.cash:.4f} mtm={mark_to_market(state, book.midpoint):.4f} dd={drawdown_pct(state, book.midpoint):.2%} fills={len(fills)}"
         if adaptive_report is not None:
             status = f"{status} adaptive={adaptive_report.policy_name}"
+        if state.halted:
+            status = f"{status} halt={state.halt_reason}"
+        if state.stopped:
+            status = f"{status} stop={state.stop_reason}"
         print(status)
 
         if remaining > 0:

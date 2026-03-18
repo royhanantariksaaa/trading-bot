@@ -508,18 +508,20 @@ def run_bot(config: Config) -> None:
                 )
                 print(render_live_readonly_report(readonly_report), end="", flush=True)
                 notification_key = readonly_notification_key(readonly_report)
-                should_send_readonly = (
-                    notification_key != readonly_last_notification_key
-                    or readonly_last_notification_loop < 0
+                key_changed = notification_key != readonly_last_notification_key
+                heartbeat_due = (
+                    readonly_last_notification_loop < 0
                     or (loops - readonly_last_notification_loop) >= readonly_notification_interval_loops
                 )
+                should_send_readonly = key_changed or heartbeat_due
                 if should_send_readonly:
                     send_status(
                         notifier,
                         format_live_readonly_notification(
                             readonly_report,
-                            include_selection=notification_key != readonly_last_notification_key or readonly_last_notification_loop < 0,
-                            include_adaptive=notification_key != readonly_last_notification_key or readonly_last_notification_loop < 0,
+                            include_selection=key_changed or heartbeat_due,
+                            include_adaptive=key_changed or heartbeat_due,
+                            reminder=heartbeat_due and not key_changed and readonly_last_notification_loop >= 0,
                         ),
                     )
                     readonly_last_notification_key = notification_key

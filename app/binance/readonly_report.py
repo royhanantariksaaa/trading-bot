@@ -433,6 +433,13 @@ def build_live_readonly_report(
     return report
 
 
+def _compact_text(value: str, *, limit: int = 160) -> str:
+    collapsed = " ".join((value or "").split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: max(0, limit - 1)].rstrip() + "…"
+
+
 def readonly_notification_key(report: ReadonlyReport) -> str:
     position_state = "flat"
     if report.position is not None:
@@ -440,16 +447,50 @@ def readonly_notification_key(report: ReadonlyReport) -> str:
             f"long:{report.position.qty:.6f}:{report.position.entry_price:.4f}:"
             f"{report.position.stop_loss:.4f}:{report.position.take_profit:.4f}"
         )
+    selection_state = ""
+    if report.selection is not None:
+        selection_state = _compact_text(report.selection.summary, limit=200)
+    elif report.selection_note:
+        selection_state = _compact_text(report.selection_note, limit=200)
+    adaptive_state = ""
+    if report.adaptive_report is not None:
+        adaptive_state = _compact_text(report.adaptive_report.summary(), limit=200)
+    elif report.adaptive_note:
+        adaptive_state = _compact_text(report.adaptive_note, limit=200)
+    entry_state = ""
+    if report.entry_plan is not None:
+        entry_state = (
+            f"entry:{int(report.entry_plan.allowed)}:{report.entry_plan.quote_budget:.4f}:"
+            f"{report.entry_plan.estimated_qty:.6f}:{report.entry_plan.stop_loss:.4f}:"
+            f"{report.entry_plan.take_profit:.4f}:{_compact_text(report.entry_plan.reason, limit=120)}"
+        )
+    exit_state = ""
+    if report.exit_plan is not None:
+        exit_state = (
+            f"exit:{int(report.exit_plan.allowed)}:{report.exit_plan.qty:.6f}:"
+            f"{_compact_text(report.exit_plan.reason, limit=120)}"
+        )
+    reasons_state = " || ".join(_compact_text(reason, limit=120) for reason in report.decision_reasons[:3])
+    open_orders_state = ",".join(
+        f"{order.side}:{order.order_type}:{order.status}:{order.qty:.6f}:{order.stop_price:.4f}"
+        for order in report.open_orders[:3]
+    )
     return "|".join(
         [
             report.symbol,
             report.timeframe,
             report.signal or "hold",
             report.decision_action,
-            report.decision_reason,
+            _compact_text(report.decision_reason, limit=200),
+            reasons_state,
             "1" if report.htf_ok else "0",
             position_state,
             report.sell_reason,
+            selection_state,
+            adaptive_state,
+            entry_state,
+            exit_state,
+            open_orders_state,
         ]
     )
 
@@ -459,9 +500,10 @@ def format_live_readonly_notification(
     *,
     include_selection: bool = False,
     include_adaptive: bool = False,
+    reminder: bool = False,
 ) -> str:
     lines = [
-        "[BINANCE READONLY]",
+        "[BINANCE READONLY HEARTBEAT]" if reminder else "[BINANCE READONLY]",
         f"Pair: `{report.symbol}` | TF: `{report.timeframe}` | Signal: `{report.signal or 'hold'}`",
         f"Proposed action: `{report.decision_action}` | HTF ok: `{report.htf_ok}`",
         f"Live / Signal price: `{report.live_price:.4f}` / `{report.signal_price:.4f}` | Quote free: `{report.quote_free:.4f}`",
@@ -474,14 +516,14 @@ def format_live_readonly_notification(
         lines.append("Position: `flat`")
     if include_selection:
         if report.selection is not None:
-            lines.append(f"Selected market: `{report.selection.summary}`")
+            lines.append(f"Selected market: `{_compact_text(report.selection.summary, limit=220)}`")
         elif report.selection_note:
-            lines.append(f"Selected market: `{report.selection_note}`")
+            lines.append(f"Selected market: `{_compact_text(report.selection_note, limit=220)}`")
     if include_adaptive:
         if report.adaptive_report is not None:
-            lines.append(f"Adaptive summary: `{report.adaptive_report.summary()}`")
+            lines.append(f"Adaptive summary: `{_compact_text(report.adaptive_report.summary(), limit=220)}`")
         elif report.adaptive_note:
-            lines.append(f"Adaptive summary: `{report.adaptive_note}`")
+            lines.append(f"Adaptive summary: `{_compact_text(report.adaptive_note, limit=220)}`")
     if report.decision_reason:
         lines.append(f"Reason: {report.decision_reason}")
     for reason in report.decision_reasons[:3]:

@@ -232,10 +232,34 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
         self.assertIn("Reason: buy signal passed sizing and filters", notification)
         self.assertIn("Reports:", notification)
 
+        heartbeat = format_live_readonly_notification(
+            report,
+            include_selection=True,
+            include_adaptive=True,
+            reminder=True,
+        )
+        self.assertIn("[BINANCE READONLY HEARTBEAT]", heartbeat)
+
         first_key = readonly_notification_key(report)
         self.assertIn("BUY", first_key)
         report.decision_reason = "changed reason"
         self.assertNotEqual(first_key, readonly_notification_key(report))
+
+        changed_key = readonly_notification_key(report)
+        report.decision_reason = "buy signal passed sizing and filters"
+        report.selection = RuntimeSelection(
+            venue="binance",
+            symbol="ADA/USDT",
+            market_id="ADAUSDT",
+            source="scan",
+            summary="ADA/USDT score=95.0 rank=1 profile=range",
+        )
+        self.assertNotEqual(changed_key, readonly_notification_key(report))
+
+        changed_key = readonly_notification_key(report)
+        report.adaptive_note = "adaptive overlay fallback changed"
+        report.adaptive_report = None
+        self.assertNotEqual(changed_key, readonly_notification_key(report))
 
 
 if __name__ == "__main__":

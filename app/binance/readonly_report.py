@@ -238,7 +238,7 @@ class ReadonlyReport:
                     lines.append(base)
                     if row.tradable:
                         lines.append(
-                            f"  - px/live=`{row.signal_price:.4f}`/`{row.live_price:.4f}` | RSI=`{row.rsi:.2f}` | EMA=`{row.ema_fast:.4f}/{row.ema_slow:.4f}` | HTF=`{row.htf_ok}`"
+                            f"  - px/live=`{row.signal_price:.4f}`/`{row.live_price:.4f}` | RSI=`{row.rsi:.2f}` | EMA=`{row.ema_fast:.4f}/{row.ema_slow:.4f}` | HTF=`{row.htf_text or 'htf=off'}` | HTF ok=`{row.htf_ok}`"
                         )
                         lines.append(
                             f"  - gates: ema_up=`{row.gates.get('crossed_up', False)}` ema_down=`{row.gates.get('crossed_down', False)}` rsi_entry=`{row.gates.get('rsi_buy_ok', False)}` rsi_exit=`{row.gates.get('rsi_sell_ok', False)}`"

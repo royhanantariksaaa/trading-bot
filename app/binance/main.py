@@ -266,6 +266,38 @@ def _holding_signal_action(signal: str, htf_ok: bool) -> tuple[str, str]:
     return "HOLD", "no actionable setup on owned asset"
 
 
+def _holding_htf_state(config: Config, exchange, symbol: str, signal_timestamp) -> tuple[bool, str]:
+    if not config.use_htf_filter:
+        return True, "htf=off"
+
+    htf_ok = True
+    htf_parts: list[str] = []
+    htf1 = prepare_htf_rsi_filter(exchange, symbol, config.htf_1_timeframe, config.htf_1_rsi_period, config.htf_1_rsi_min)
+    htf1_row = htf1[htf1["timestamp"] <= signal_timestamp].tail(1)
+    if htf1_row.empty:
+        htf_ok = False
+        htf_parts.append(f"{config.htf_1_timeframe}=missing")
+    else:
+        htf1_rsi = float(htf1_row.iloc[0][f"htf_rsi_{config.htf_1_timeframe}"])
+        htf1_pass = bool(htf1_row.iloc[0][f"htf_pass_{config.htf_1_timeframe}"])
+        htf_ok = htf_ok and htf1_pass
+        htf_parts.append(f"{config.htf_1_timeframe}_rsi={htf1_rsi:.2f}")
+
+    if config.htf_2_enabled:
+        htf2 = prepare_htf_rsi_filter(exchange, symbol, config.htf_2_timeframe, config.htf_2_rsi_period, config.htf_2_rsi_min)
+        htf2_row = htf2[htf2["timestamp"] <= signal_timestamp].tail(1)
+        if htf2_row.empty:
+            htf_ok = False
+            htf_parts.append(f"{config.htf_2_timeframe}=missing")
+        else:
+            htf2_rsi = float(htf2_row.iloc[0][f"htf_rsi_{config.htf_2_timeframe}"])
+            htf2_pass = bool(htf2_row.iloc[0][f"htf_pass_{config.htf_2_timeframe}"])
+            htf_ok = htf_ok and htf2_pass
+            htf_parts.append(f"{config.htf_2_timeframe}_rsi={htf2_rsi:.2f}")
+
+    return htf_ok, " | ".join(htf_parts) if htf_parts else "htf=off"
+
+
 def _build_holding_signals(config: Config, exchange, state) -> list[HoldingSignalSnapshot]:
     snapshot = state.account_snapshot
     if snapshot is None:
@@ -316,8 +348,7 @@ def _build_holding_signals(config: Config, exchange, state) -> list[HoldingSigna
                 rsi_buy_min=config.rsi_buy_min,
                 rsi_sell_max=config.rsi_sell_max,
             )
-            htf_ok = True
-            htf_text = "htf=off"
+            htf_ok, htf_text = _holding_htf_state(config, exchange, symbol, signal_row["timestamp"])
             action, reason = _holding_signal_action(signal, htf_ok)
             rows.append(
                 HoldingSignalSnapshot(

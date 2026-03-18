@@ -9,6 +9,10 @@ trading-bot/
   app/
     __main__.py      # `python -m app` -> Binance default entrypoint
     main.py
+    portfolio/
+      __main__.py    # `python -m app.portfolio` -> portfolio allocator / paper ledger
+      main.py
+      ...
     selection/
       __main__.py    # `python -m app.selection` -> Binance market scan
       main.py
@@ -112,6 +116,27 @@ When `BINANCE_SELECTION_MODE` is `csv` or `scan`, the selected market is also cl
 
 If you also set `BINANCE_ADAPTIVE_MODE=paper`, Binance will do a second conservative pass using recent OHLCV candles and ticker spread data, then layer one of the bounded adaptive policies on top of the selected market profile. That adaptive pass only runs in paper mode unless you explicitly set `BINANCE_ADAPTIVE_MODE=on`.
 
+## Run Portfolio Foundation
+
+The portfolio layer is a separate, conservative v1 allocator. It uses the existing Binance/Polymarket market scanners, but keeps execution in paper/report mode and maintains its own multi-position ledger.
+
+```bat
+set PORTFOLIO_VENUE=binance
+set PORTFOLIO_SELECTION_MODE=scan
+set PORTFOLIO_RUN_MODE=paper
+python -m app.portfolio
+```
+
+Use `PORTFOLIO_RUN_MODE=report` for a zero-mutation dry run that only writes the allocation report. Use `PORTFOLIO_VENUE=polymarket` to point the same allocator at the Polymarket scan path.
+
+The portfolio foundation adds:
+
+- multiple tracked positions in portfolio state
+- bounded allocation caps
+- reserve cash handling
+- explainable allocation decisions
+- separate portfolio state and reports from the existing Binance runtime
+
 Scan Polymarket YES outcomes using Gamma + live CLOB books and export ranked candidates to `data/market/polymarket_candidates.csv` plus report files:
 
 ```bat
@@ -180,11 +205,14 @@ Defaults live under `data/`:
 - `data/backtests/backtest_trades.csv`: default Binance backtest output
 - `data/market/binance_adaptive_report.txt`: latest Binance adaptive decision report
 - `data/market/binance_adaptive_report.json`: machine-readable adaptive decision report
+- `data/state/portfolio_state.json`: portfolio ledger state for the allocator/paper run
+- `data/market/portfolio_allocation_report.txt`: latest portfolio allocation report
+- `data/market/portfolio_allocation_report.json`: machine-readable portfolio allocation report
 - `data/state/polymarket_state.json`: Polymarket state file
 - `data/logs/polymarket_runs.csv`: Polymarket loop log
 - `data/market/`: ad hoc market CSV snapshots and local samples
 
-All of those paths can be overridden with env vars such as `BINANCE_STATE_PATH`, `BINANCE_TRADES_PATH`, `BINANCE_BACKTEST_OUTPUT_PATH`, `BINANCE_ADAPTIVE_REPORT_PATH`, `PM_STATE_PATH`, and `PM_LOG_PATH`.
+All of those paths can be overridden with env vars such as `BINANCE_STATE_PATH`, `BINANCE_TRADES_PATH`, `BINANCE_BACKTEST_OUTPUT_PATH`, `BINANCE_ADAPTIVE_REPORT_PATH`, `PORTFOLIO_STATE_PATH`, `PORTFOLIO_REPORT_PATH`, `PORTFOLIO_REPORT_JSON_PATH`, `PM_STATE_PATH`, and `PM_LOG_PATH`.
 
 ## Notes
 
@@ -198,5 +226,6 @@ Still not a finished production platform:
 - live fill truth still relies on REST reconciliation, not a Binance user-data websocket
 - take-profit is software-managed; only stop-loss is armed as a live protective order
 - there is no full monitoring/heartbeat layer yet
+- the portfolio allocator is paper/report only in v1; live multi-position execution remains on the roadmap
 
 Use `USE_TESTNET=true` first, keep size tiny, and rotate any webhook or API secret that may already have been exposed.

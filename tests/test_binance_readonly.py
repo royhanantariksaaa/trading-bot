@@ -10,6 +10,7 @@ from app.binance.main import _adaptive_runtime_allows
 from app.binance.models import AccountSnapshot, DustHolding, WalletHolding
 from app.binance.readonly_report import (
     HoldingSignalSnapshot,
+    ReadonlyReport,
     build_live_readonly_report,
     format_live_readonly_notification,
     readonly_decision_summary_key,
@@ -105,6 +106,22 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
         )
         selection_profile = build_strategy_profile("trend", "binance", profile_metrics)
         assert selection_profile is not None
+        selection_path = Path(__file__).resolve().parent / ".tmp_binance_candidates.csv"
+        selection_report_path = Path(__file__).resolve().parent / ".tmp_binance_candidates_report.txt"
+        selection_json_path = Path(__file__).resolve().parent / ".tmp_binance_candidates_report.json"
+        selection_path.write_text(
+            "\n".join(
+                [
+                    "symbol,accepted,rank,score_total,score_explanation,filter_failures",
+                    'SOL/USDT,true,1,91.2,"SOL/USDT scored 91.20 on binance. | Top supports: liquidity=100.0 + spread=98.1 + activity=95.0. | Penalties: none.",',
+                    'DOGE/USDT,true,2,88.5,"DOGE/USDT scored 88.50 on binance. | Top supports: liquidity=94.0 + spread=97.2 + activity=89.0. | Penalties: none.",',
+                    'ADA/USDT,true,3,82.1,"ADA/USDT scored 82.10 on binance. | Top supports: liquidity=90.0 + spread=96.0 + activity=84.0. | Penalties: none.",',
+                    'SYRUP/USDT,false,,0,,"base_asset_suffix:base_asset=SYRUP"',
+                    'AWE/USDT,false,,0,,"quote_volume_24h:quote_volume_24h=860927.2395"',
+                ]
+            ),
+            encoding="utf-8",
+        )
         selection = RuntimeSelection(
             venue="binance",
             symbol="SOL/USDT",
@@ -112,9 +129,9 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
             source="scan",
             metrics=profile_metrics,
             strategy_profile=selection_profile,
-            path=Path("data/market/binance_candidates.csv"),
-            report_path=Path("data/market/binance_candidates_report.txt"),
-            report_json_path=Path("data/market/binance_candidates_report.json"),
+            path=selection_path,
+            report_path=selection_report_path,
+            report_json_path=selection_json_path,
             summary="SOL/USDT score=91.2 rank=1 profile=trend",
             explanation="Selected market\nWhy: highest score in scan",
         )
@@ -286,6 +303,9 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
         finally:
             path.unlink(missing_ok=True)
             json_path.unlink(missing_ok=True)
+            selection_path.unlink(missing_ok=True)
+            selection_report_path.unlink(missing_ok=True)
+            selection_json_path.unlink(missing_ok=True)
 
         self.assertIn("Binance live read-only report", text)
         self.assertIn("Live read-only guard", text)
@@ -339,6 +359,7 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
         self.assertIn("SOL=WATCH BUY", compact)
         self.assertIn("LDUSDC=BLOCKED", compact)
         self.assertIn("SOL=buy_above:", compact)
+        self.assertIn("+1 more", compact)
         self.assertNotIn("Adaptive summary:", compact)
         self.assertNotIn("Reports:", compact)
 
@@ -362,6 +383,48 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
         report.adaptive_note = "adaptive overlay fallback changed"
         report.adaptive_report = None
         self.assertNotEqual(changed_key, readonly_notification_key(report))
+
+    def test_compact_notification_adds_scanner_summary_from_selection_csv(self) -> None:
+        selection_path = Path(__file__).resolve().parent / ".tmp_binance_candidates_scanner.csv"
+        selection_path.write_text(
+            "\n".join(
+                [
+                    "symbol,accepted,rank,score_total,score_explanation,filter_failures",
+                    'SOL/USDT,true,1,91.2,"SOL/USDT scored 91.20 on binance. | Top supports: liquidity=100.0 + spread=98.1 + activity=95.0. | Penalties: none.",',
+                    'DOGE/USDT,true,2,88.5,"DOGE/USDT scored 88.50 on binance. | Top supports: liquidity=94.0 + spread=97.2 + activity=89.0. | Penalties: none.",',
+                    'ADA/USDT,true,3,82.1,"ADA/USDT scored 82.10 on binance. | Top supports: liquidity=90.0 + spread=96.0 + activity=84.0. | Penalties: none.",',
+                    'SYRUP/USDT,false,,0,,"base_asset_suffix:base_asset=SYRUP"',
+                    'AWE/USDT,false,,0,,"quote_volume_24h:quote_volume_24h=860927.2395"',
+                ]
+            ),
+            encoding="utf-8",
+        )
+        try:
+            report = ReadonlyReport(
+                venue="binance",
+                symbol="SOL/USDT",
+                timeframe="15m",
+                scanned_at="2026-03-18T00:00:00+00:00",
+                bot_mode="live_readonly",
+                execution_mode="auto",
+                selection_mode="scan",
+                use_testnet=False,
+                enable_live_trading=False,
+                order_test_before_submit=False,
+                selection=RuntimeSelection(venue="binance", path=selection_path, summary="SOL/USDT score=91.2 rank=1 profile=trend"),
+            )
+            compact = format_live_readonly_notification(report, include_selection=True, compact=True)
+        finally:
+            selection_path.unlink(missing_ok=True)
+
+        self.assertIn("Scanner fresh:", compact)
+        self.assertIn("Scanner basis:", compact)
+        self.assertIn("Scanner rejected:", compact)
+        self.assertIn("SOL=91.2 move=+0.0%", compact)
+        self.assertIn("DOGE=88.5 move=+0.0%", compact)
+        self.assertIn("deduped by base asset", compact)
+        self.assertIn("SYRUP", compact)
+        self.assertIn("AWE low vol 860927", compact)
 
     def test_decision_summary_key_tracks_snapshot_changes_that_notification_key_misses(self) -> None:
         config = self._make_config()

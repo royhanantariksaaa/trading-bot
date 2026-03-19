@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -620,10 +621,12 @@ def readonly_decision_summary_key(report: ReadonlyReport) -> str:
 
 def _holding_action_rank(action: str) -> int:
     order = {
-        "REVIEW SELL": 0,
-        "WATCH BUY": 1,
-        "WAIT": 2,
-        "HOLD": 3,
+        "EXIT_TREND_BREAK": 0,
+        "EXIT_WEAKNESS": 1,
+        "REVIEW SELL": 2,
+        "WATCH BUY": 3,
+        "WAIT": 4,
+        "HOLD": 5,
     }
     return order.get(action, 9)
 
@@ -640,6 +643,9 @@ def _top_owned_signal_line(report: ReadonlyReport, *, limit: int = 3) -> str:
     for row in top:
         status = row.action if row.tradable else "BLOCKED"
         parts.append(f"{row.asset}={status}")
+    remaining = len(ranked) - len(top)
+    if remaining > 0:
+        parts.append(f"+{remaining} more")
     return " | ".join(parts)
 
 
@@ -651,7 +657,8 @@ def _owned_signal_preview_line(report: ReadonlyReport, *, limit: int = 3) -> str
         key=lambda row: (_holding_action_rank(row.action), -(row.estimated_notional or 0.0), row.asset),
     )
     parts: list[str] = []
-    for row in ranked[:limit]:
+    shown = ranked[:limit]
+    for row in shown:
         if not row.tradable:
             parts.append(f"{row.asset}=BLOCKED")
             continue
@@ -659,14 +666,18 @@ def _owned_signal_preview_line(report: ReadonlyReport, *, limit: int = 3) -> str
             parts.append(
                 f"{row.asset}=buy_above:{row.signal_price:.4f} sl:n/a tp:n/a"
             )
-        elif row.action == "REVIEW SELL":
+        elif row.action in {"REVIEW SELL", "EXIT_WEAKNESS", "EXIT_TREND_BREAK"}:
+            label = "sell_watch" if row.action == "REVIEW SELL" else row.action.lower()
             parts.append(
-                f"{row.asset}=sell_watch:{row.live_price:.4f} reason:{_compact_text(row.reason or 'sell review', limit=40)}"
+                f"{row.asset}={label}:{row.live_price:.4f} reason:{_compact_text(row.reason or 'sell review', limit=40)}"
             )
         elif row.action == "HOLD":
             parts.append(f"{row.asset}=hold@{row.live_price:.4f}")
         else:
             parts.append(f"{row.asset}={row.action.lower()}@{row.live_price:.4f}")
+    remaining = len(ranked) - len(shown)
+    if remaining > 0:
+        parts.append(f"+{remaining} more")
     return " | ".join(parts)
 
 
@@ -687,6 +698,198 @@ def _decision_preview_line(report: ReadonlyReport) -> str:
             f"tp=`{report.position.take_profit:.4f}`"
         )
     return ""
+
+
+def _load_selection_rows(report: ReadonlyReport) -> list[dict[str, str]]:
+    selection_path = report.selection.path if report.selection is not None else None
+    if selection_path is None:
+        return []
+    try:
+        with Path(selection_path).open("r", newline="", encoding="utf-8") as fh:
+            return list(csv.DictReader(fh))
+    except Exception:
+        return []
+
+
+def _symbol_alias(symbol: str) -> str:
+    base = (symbol or "").split("/", 1)[0].strip()
+    return base or (symbol or "")
+
+
+def _safe_float(value: str | float | None, default: float = 0.0) -> float:
+    try:
+        if value in (None, ""):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: str | int | None, default: int = 0) -> int:
+    try:
+        if value in (None, ""):
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _driver_summary(explanation: str) -> str:
+    marker = "Top supports:"
+    if marker not in explanation:
+        return _compact_text(explanation, limit=52)
+    segment = explanation.split(marker, 1)[1].split("|", 1)[0]
+    cleaned = ", ".join(part.strip() for part in segment.split(",") if part.strip())
+    return _compact_text(cleaned or explanation, limit=52)
+
+
+def _filter_failure_summary(raw: str) -> str:
+    first = next((part.strip() for part in (raw or "").split("|") if part.strip()), "")
+    if not first:
+        return "rejected"
+    name, _, detail = first.partition(":")
+    label = name.replace("_", " ").strip()
+    detail = detail.strip()
+    if name == "quote_volume_24h" and "=" in detail:
+        value = detail.split("=", 1)[1]
+        try:
+            return f"low vol {float(value):.0f}"
+        except ValueError:
+            return f"low vol {value}"
+    if detail:
+        return _compact_text(f"{label} {detail}", limit=30)
+    return _compact_text(label, limit=30)
+
+
+def _owned_assets(report: ReadonlyReport) -> set[str]:
+    owned = {row.asset.upper() for row in report.holding_signals if row.asset}
+    if report.account_snapshot is not None:
+        owned.update(item.asset.upper() for item in (report.account_snapshot.holdings or []) if item.asset)
+        owned.update(item.asset.upper() for item in (report.account_snapshot.dust_holdings or []) if item.asset)
+        if report.account_snapshot.base_asset:
+            owned.add(report.account_snapshot.base_asset.upper())
+    return owned
+
+
+def _scanner_candidates(report: ReadonlyReport) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    rows = _load_selection_rows(report)
+    accepted = [row for row in rows if str(row.get("accepted") or "").strip().lower() == "true"]
+    rejected = [row for row in rows if str(row.get("accepted") or "").strip().lower() != "true"]
+    return accepted, rejected
+
+
+def _quote_priority(symbol: str) -> int:
+    if symbol.endswith("/USDC"):
+        return 0
+    if symbol.endswith("/USDT"):
+        return 1
+    return 2
+
+
+def _promising_score(row: dict[str, str]) -> float:
+    base_score = _safe_float(row.get("score_total"))
+    movement = abs(_safe_float(row.get("price_change_pct_24h")))
+    day_range = _safe_float(row.get("range_pct_24h"))
+    spread = _safe_float(row.get("spread_bps"))
+    quote_volume = _safe_float(row.get("volume_quote_24h"))
+    activity = _safe_float(row.get("trade_count_24h"))
+
+    movement_bonus = min(movement, 8.0) * 0.6
+    range_bonus = min(day_range, 10.0) * 0.35
+    spread_penalty = min(spread, 12.0) * 0.45
+    liquidity_bonus = 0.0
+    if quote_volume >= 50_000_000:
+        liquidity_bonus += 2.0
+    elif quote_volume >= 10_000_000:
+        liquidity_bonus += 1.0
+    if activity >= 150_000:
+        liquidity_bonus += 1.0
+    elif activity >= 50_000:
+        liquidity_bonus += 0.5
+    return base_score + movement_bonus + range_bonus + liquidity_bonus - spread_penalty
+
+
+def _dedupe_best_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    best: dict[str, dict[str, str]] = {}
+    for row in rows:
+        alias = _symbol_alias(str(row.get("symbol") or ""))
+        current = best.get(alias)
+        if current is None:
+            best[alias] = row
+            continue
+        current_key = (
+            -_promising_score(current),
+            _quote_priority(str(current.get("symbol") or "")),
+            _safe_int(current.get("rank"), 10**9),
+        )
+        candidate_key = (
+            -_promising_score(row),
+            _quote_priority(str(row.get("symbol") or "")),
+            _safe_int(row.get("rank"), 10**9),
+        )
+        if candidate_key < current_key:
+            best[alias] = row
+    return sorted(
+        best.values(),
+        key=lambda row: (
+            -_promising_score(row),
+            _quote_priority(str(row.get("symbol") or "")),
+            _safe_int(row.get("rank"), 10**9),
+            str(row.get("symbol") or ""),
+        ),
+    )
+
+
+def _scanner_fresh_line(report: ReadonlyReport, *, limit: int = 4) -> str:
+    accepted, _ = _scanner_candidates(report)
+    owned = _owned_assets(report)
+    fresh = [row for row in _dedupe_best_rows(accepted) if _symbol_alias(str(row.get("symbol") or "")).upper() not in owned]
+    parts: list[str] = []
+    for row in fresh[:limit]:
+        alias = _symbol_alias(str(row.get("symbol") or ""))
+        score = _promising_score(row)
+        driver = _driver_summary(str(row.get("score_explanation") or ""))
+        move = _safe_float(row.get("price_change_pct_24h"))
+        move_tag = f"move={move:+.1f}%"
+        parts.append(f"{alias}={score:.1f} {move_tag} {driver}".strip())
+    return " | ".join(parts)
+
+
+def _scanner_owned_line(report: ReadonlyReport, *, limit: int = 3) -> str:
+    accepted, _ = _scanner_candidates(report)
+    owned = _owned_assets(report)
+    owned_rows = [row for row in _dedupe_best_rows(accepted) if _symbol_alias(str(row.get("symbol") or "")).upper() in owned]
+    parts: list[str] = []
+    for row in owned_rows[:limit]:
+        alias = _symbol_alias(str(row.get("symbol") or ""))
+        score = _promising_score(row)
+        move = _safe_float(row.get("price_change_pct_24h"))
+        parts.append(f"{alias}={score:.1f} move={move:+.1f}%")
+    return " | ".join(parts)
+
+
+def _scanner_basis_line(report: ReadonlyReport) -> str:
+    accepted, _ = _scanner_candidates(report)
+    deduped = _dedupe_best_rows(accepted)
+    if not deduped:
+        return ""
+    return "deduped by base asset | biased for move+range | still respects liq+spread+activity"
+
+
+def _scanner_rejected_line(report: ReadonlyReport, *, limit: int = 3) -> str:
+    _, rejected = _scanner_candidates(report)
+    parts: list[str] = []
+    seen: set[str] = set()
+    for row in rejected:
+        alias = _symbol_alias(str(row.get("symbol") or ""))
+        if alias in seen:
+            continue
+        seen.add(alias)
+        reason = _filter_failure_summary(str(row.get("filter_failures") or ""))
+        parts.append(f"{alias} {reason}")
+        if len(parts) >= limit:
+            break
+    return " | ".join(parts)
 
 
 def format_live_readonly_notification(
@@ -741,6 +944,18 @@ def format_live_readonly_notification(
         owned_preview_line = _owned_signal_preview_line(report)
         if owned_preview_line:
             lines.append(f"Owned setups: `{owned_preview_line}`")
+        scanner_fresh_line = _scanner_fresh_line(report)
+        if scanner_fresh_line:
+            lines.append(f"Scanner fresh: `{scanner_fresh_line}`")
+        scanner_owned_line = _scanner_owned_line(report)
+        if scanner_owned_line:
+            lines.append(f"Scanner owned: `{scanner_owned_line}`")
+        scanner_basis_line = _scanner_basis_line(report)
+        if scanner_basis_line:
+            lines.append(f"Scanner basis: `{scanner_basis_line}`")
+        scanner_rejected_line = _scanner_rejected_line(report)
+        if scanner_rejected_line:
+            lines.append(f"Scanner rejected: `{scanner_rejected_line}`")
         decision_preview_line = _decision_preview_line(report)
         if decision_preview_line:
             lines.append(f"Plan: `{decision_preview_line}`")

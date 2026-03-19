@@ -631,25 +631,21 @@ def _holding_action_rank(action: str) -> int:
     return order.get(action, 9)
 
 
-def _top_owned_signal_line(report: ReadonlyReport, *, limit: int = 3) -> str:
+def _top_owned_signal_line(report: ReadonlyReport) -> str:
     if not report.holding_signals:
         return ""
     ranked = sorted(
         report.holding_signals,
         key=lambda row: (_holding_action_rank(row.action), -(row.estimated_notional or 0.0), row.asset),
     )
-    top = ranked[:limit]
     parts = []
-    for row in top:
+    for row in ranked:
         status = row.action if row.tradable else "BLOCKED"
         parts.append(f"{row.asset}={status}")
-    remaining = len(ranked) - len(top)
-    if remaining > 0:
-        parts.append(f"+{remaining} more")
     return " | ".join(parts)
 
 
-def _owned_signal_preview_line(report: ReadonlyReport, *, limit: int = 3) -> str:
+def _owned_signal_preview_line(report: ReadonlyReport) -> str:
     if not report.holding_signals:
         return ""
     ranked = sorted(
@@ -657,8 +653,7 @@ def _owned_signal_preview_line(report: ReadonlyReport, *, limit: int = 3) -> str
         key=lambda row: (_holding_action_rank(row.action), -(row.estimated_notional or 0.0), row.asset),
     )
     parts: list[str] = []
-    shown = ranked[:limit]
-    for row in shown:
+    for row in ranked:
         if not row.tradable:
             parts.append(f"{row.asset}=BLOCKED")
             continue
@@ -675,9 +670,6 @@ def _owned_signal_preview_line(report: ReadonlyReport, *, limit: int = 3) -> str
             parts.append(f"{row.asset}=hold@{row.live_price:.4f}")
         else:
             parts.append(f"{row.asset}={row.action.lower()}@{row.live_price:.4f}")
-    remaining = len(ranked) - len(shown)
-    if remaining > 0:
-        parts.append(f"+{remaining} more")
     return " | ".join(parts)
 
 

@@ -359,7 +359,7 @@ class BinanceLiveReadonlyTest(unittest.TestCase):
         self.assertIn("SOL=WATCH BUY", compact)
         self.assertIn("LDUSDC=BLOCKED", compact)
         self.assertIn("SOL=buy_above:", compact)
-        self.assertIn("+1 more", compact)
+        self.assertNotIn("+1 more", compact)
         self.assertNotIn("Adaptive summary:", compact)
         self.assertNotIn("Reports:", compact)
 

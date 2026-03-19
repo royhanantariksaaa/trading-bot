@@ -98,11 +98,69 @@ If `DISCORD_WEBHOOK_URL` is configured, live readonly now also sends compact Dis
 - proposed action preview (`HOLD`, `BUY`, `SELL`, `SKIP BUY`, `SKIP SELL`)
 - key reason / trigger lines for hold, skip, buy, and sell decisions
 
+Manual-confirm live trading now also supports a lightweight command queue for Discord/OpenClaw approval flows:
+- bot still posts SELL tickets to Discord/webhook
+- you queue approval commands locally with `python -m app.binance.command --command "confirm sell xrp" ...`
+- the runtime polls `data/logs/command_queue.csv`
+- only `DISCORD_COMMAND_ACTOR_IDS` are accepted when `ENABLE_DISCORD_COMMAND_EXECUTION=true`
+- approved SELL tickets are executed by the bot on the next loop in `BOT_MODE=live` + `EXECUTION_MODE=manual`
+- `python -m app.binance.openclaw_bridge --message "confirm sell xrp" ...` is the thin OpenClaw/Discord reply bridge into the exact same queue path
+- the bridge also accepts `--context "Owned signals: ..."` so a simple Discord reply like `okay`, `sell xrp`, or just `xrp` can resolve to `confirm sell <asset>` when exactly one owned asset is in a sell-ready state
+- optional fallback deputy mode: if Roy does not respond to a pending SELL ticket before `FALLBACK_SELL_TIMEOUT_SECONDS`, OpenClaw can approve and execute that SELL automatically
+
+This is the execution bridge for Mode A: Discord/OpenClaw remains the control layer, Binance API remains the execution layer.
+
 The full text/JSON reports still stay local. Discord notifications are compact and throttled: the bot sends them immediately when the higher-level readonly state changes (action / reason / selection / adaptive / entry-exit preview / open-order state), sends a short compact status refresh at most every `BINANCE_READONLY_COMPACT_INTERVAL_SECONDS` (default `120`) when only the live signal snapshot drifts, and sends a heartbeat reminder at most every `BINANCE_READONLY_HEARTBEAT_INTERVAL_SECONDS` (default `1800`) if nothing changes.
 
 The compact cadence message is intentionally near-terminal: pair / timeframe, signal, action, reason, live + signal price, RSI, EMA fast/slow, quote free, selected market when relevant, and current exposure. That keeps Discord feeling alive without reposting the giant local report every loop.
 
 Live readonly now also separates Binance dust / unactionable inventory from managed position state. If the wallet holds a tiny balance that falls below the bot's actionable sell threshold for the tracked symbol (roughly Binance min-notional with a small 5% safety buffer, plus lot-size checks), that inventory stays visible in the report/JSON under `dust_holdings` but does not count as an open managed position.
+
+## Run Discord Bot
+
+This repo now has a proper Discord bot transport layer for command-based control. It reuses the existing app logic instead of mixing Discord internals into the trading runtime.
+
+Install deps first so `discord.py` is available:
+
+```bat
+python -m pip install -r requirements.txt
+```
+
+Set these env vars in `.env`:
+
+```env
+DISCORD_BOT_TOKEN=your-bot-token
+DISCORD_BOT_APPLICATION_ID=your-application-id
+# Optional but useful while testing slash-command sync
+DISCORD_BOT_GUILD_ID=your-test-server-id
+DISCORD_BOT_SYNC_COMMANDS=true
+DISCORD_BOT_ALLOW_MANUAL_ACTIONS=true
+```
+
+Then run the bot:
+
+```bat
+python -m app.discord_bot
+```
+
+Quick sanity check for config wiring:
+
+```bat
+python -m app.discord_bot --check-config
+```
+
+Initial slash commands:
+
+- `/help` -> command summary
+- `/status` -> local runtime snapshot from saved bot state / tickets
+- `/outlook [symbol]` -> generates the existing outlook report and returns the text
+- `/scan [venue] [top]` -> runs the existing market scan for Binance or Polymarket
+- `/readonly` -> returns the latest saved Binance live-readonly report
+- `/approve <ticket-or-symbol>` -> queues `approve ...` into the existing manual command queue
+- `/deny <ticket-or-symbol>` -> queues `deny ...` into the existing manual command queue
+- `/confirm_sell <asset>` -> queues `confirm sell <asset>` into the existing manual command queue
+
+That means the webhook notifier remains optional. If `DISCORD_WEBHOOK_URL` is set, the runtime can still push notifications the old way. The Discord bot is a separate command surface, not a replacement for the webhook path.
 
 ## Run Binance
 
@@ -123,11 +181,20 @@ Useful Binance helpers:
 ```bat
 python -m app.binance.backtest --symbol SOL/USDT --timeframe 15m --candles 1000 --use-rsi-filter --rsi-buy-min 52 --rsi-sell-max 48
 python -m app.binance.update_ticket --ticket abc12345 --status approved
+python -m app.binance.command --command "confirm sell xrp" --actor-id 418713284825317386 --actor-label roy --source discord
+python -m app.binance.openclaw_bridge --message "confirm sell xrp" --actor-id 418713284825317386 --actor-label roy --source discord-openclaw
 python -m app.binance.log_execution --ticket abc12345 --action BUY --symbol SOL/USDT --type entry --price 94.30 --qty 0.053 --fee 0.01 --note "manual Binance fill"
+
+# Optional deputy fallback after 5 minutes of silence
+# FALLBACK_SELL_ENABLED=true
+# FALLBACK_SELL_TIMEOUT_SECONDS=300
 python -m app.binance.preview_messages
 python -m app.binance.review_day
 python -m app.binance.test_webhook
+python -m app.binance.outlook --symbol SOL/USDT
 ```
+
+The outlook helper writes a lightweight explainable bias report for `6h`, `24h`, and `3d` horizons to `data/market/binance_outlook_<symbol>.txt` plus matching JSON. It is deliberately heuristic and supervision-oriented: trend structure, RSI, momentum, and recent regime classification drive the bias/confidence output. It is not a guaranteed price forecast.
 
 Scan Binance markets and export ranked candidates to `data/market/binance_candidates.csv` plus human-readable report files:
 
@@ -251,6 +318,7 @@ Defaults live under `data/`:
 - `data/logs/manual_tickets.csv`: Binance manual ticket journal
 - `data/logs/decision_log.csv`: Binance approval / denial journal
 - `data/logs/live_execution_log.csv`: Binance manual execution journal
+- `data/logs/command_queue.csv`: queued Discord/OpenClaw approval commands for manual-confirm execution
 - `data/backtests/backtest_trades.csv`: default Binance backtest output
 - `data/market/binance_adaptive_report.txt`: latest Binance adaptive decision report
 - `data/market/binance_adaptive_report.json`: machine-readable adaptive decision report
